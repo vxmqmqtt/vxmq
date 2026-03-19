@@ -2,12 +2,7 @@
 
 `vxmq` 是一个使用 Java 实现的 MQTT Broker 项目，目标是在严格遵循 MQTT 协议的前提下，同时支持 MQTT 3.1.1 与 MQTT 5，并建立可持续演进的工程基础。
 
-当前仓库处于项目基础设施建设阶段，优先完成以下事项：
-
-- 建立统一文档体系。
-- 明确项目愿景、范围和协作规范。
-- 形成 MQTT 5 特性矩阵与架构骨架。
-- 在此基础上逐步推进实现、测试和验证。
+当前仓库已完成 `M1 最小闭环`，具备单机 Broker 的最小可运行主链路，并已建立文档、测试和决策记录基础。
 
 ## 文档入口
 
@@ -51,14 +46,22 @@ src/main/resources/application.yml
 
 ## 当前阶段目标
 
-第一阶段聚焦单机 Broker 核心能力：
+当前阶段已完成的能力：
 
-- 连接与会话管理。
-- 发布订阅主链路。
-- QoS 0 / 1 / 2 基础语义。
-- 保留消息与遗嘱消息。
-- MQTT 5 核心属性支持。
-- 基础观测与测试基础设施。
+- CONNECT / CONNACK 基础处理。
+- SUBSCRIBE / SUBACK、UNSUBSCRIBE / UNSUBACK。
+- PUBLISH QoS 0 主链路。
+- Topic Filter / Wildcard。
+- 基础断连处理与 Keep Alive。
+- 单元测试与 MQTT 集成测试基础闭环。
+
+下一阶段 `M2` 的重点将转向：
+
+- Session State。
+- Clean Start / Session Expiry。
+- QoS 1 / QoS 2。
+- Retained Message。
+- Will Message。
 
 ## 协作说明
 

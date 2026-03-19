@@ -27,6 +27,7 @@
 10. `03-protocol/subscribe-flow.md`
 11. `03-protocol/publish-flow.md`
 12. `02-architecture/topic-routing.md`
+13. `07-project/m1-acceptance-checklist.md`
 
 ## 文档约定
 
