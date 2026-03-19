@@ -24,6 +24,7 @@ import io.github.vxmqmqtt.vxmq.session.InMemorySessionRegistry;
 import io.github.vxmqmqtt.vxmq.session.SessionRegistry;
 import io.github.vxmqmqtt.vxmq.transport.ClientConnection;
 import io.github.vxmqmqtt.vxmq.transport.ClientConnectionRegistry;
+import io.github.vxmqmqtt.vxmq.transport.ConnectionState;
 import io.netty.handler.codec.mqtt.MqttConnectReturnCode;
 import io.netty.handler.codec.mqtt.MqttProperties;
 import io.netty.handler.codec.mqtt.MqttQoS;
@@ -256,6 +257,37 @@ class DefaultProtocolEngineTest {
         assertFalse(result.accepted());
         assertTrue(result.deliveries().isEmpty());
         assertEquals(MqttDisconnectReasonCode.QOS_NOT_SUPPORTED, result.disconnectReasonCode());
+    }
+
+    @Test
+    void shouldUnbindSessionWhenClientDisconnects() {
+        ClientConnection connection = connectClient("disconnect-client", 5);
+
+        protocolEngine.handleDisconnect(connection);
+
+        assertEquals(ConnectionState.DISCONNECTING, connection.state());
+        assertNull(sessionRegistry.find("disconnect-client").orElseThrow().connectionId());
+    }
+
+    @Test
+    void shouldKeepNewSessionBindingWhenSupersededConnectionCloses() {
+        ClientConnection firstConnection = connectClient("takeover-client", 5);
+        ClientConnection secondConnection = connectionRegistry.open("127.0.0.1", "takeover-client", "MQTT", 5, true);
+
+        ConnectDecision secondDecision = protocolEngine.handleConnect(secondConnection, new ConnectRequest(
+                "takeover-client",
+                "MQTT",
+                5,
+                true,
+                null,
+                false));
+        assertTrue(secondDecision.accepted());
+
+        protocolEngine.handleConnectionClosed(firstConnection);
+
+        assertEquals(ConnectionState.CLOSED, firstConnection.state());
+        assertEquals(secondConnection.internalId(),
+                sessionRegistry.find("takeover-client").orElseThrow().connectionId());
     }
 
     private ClientConnection connectClient(String clientId, int protocolVersion) {

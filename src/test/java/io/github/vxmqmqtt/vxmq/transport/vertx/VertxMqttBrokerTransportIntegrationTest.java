@@ -130,6 +130,26 @@ class VertxMqttBrokerTransportIntegrationTest {
         assertFalse(subscriber.isConnected());
     }
 
+    @Test
+    void shouldCloseClientAfterUnsupportedQos1Publish() throws Exception {
+        int port = startBroker();
+        CompletableFuture<Void> publisherClosed = new CompletableFuture<>();
+
+        publisher = mqttClient("publisher-qos1");
+        publisher.closeHandler(() -> publisherClosed.complete(null));
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, publisher.connect(port, "127.0.0.1").await().indefinitely().code());
+
+        publisher.publish(
+                "sensors/room-1/temperature",
+                Buffer.buffer("payload-qos1"),
+                MqttQoS.AT_LEAST_ONCE,
+                false,
+                false).await().indefinitely();
+
+        publisherClosed.get(5, TimeUnit.SECONDS);
+        assertFalse(publisher.isConnected());
+    }
+
     private int startBroker() {
         vertx = Vertx.vertx();
         DefaultTopicMatcher topicMatcher = new DefaultTopicMatcher();

@@ -41,7 +41,7 @@
 | 连接管理 | Keep Alive | M1 | A+B+D | 已验证 | 依赖 `vertx-mqtt` 内置 1.5 倍超时探测与断连处理 |
 | 连接管理 | Client Identifier 规则 | M1 | A+B+D | 已验证 | 已支持自动分配与重复连接替换策略 |
 | 连接管理 | Clean Start / Session Expiry | M2 | A+B+C+D | 未开始 | MQTT 5 会话关键语义 |
-| 连接管理 | Disconnect 语义 | M1 | A+B+D | 已实现 | 已覆盖主动断连、接管断连、Keep Alive 超时与基础异常断连 |
+| 连接管理 | Disconnect 语义 | M1 | A+B+D | 已验证 | 已覆盖主动断连、接管断连、Keep Alive 超时与基础异常断连 |
 | 发布订阅 | PUBLISH 基础流程 | M1 | A+B+C+D | 已验证 | 当前聚焦 QoS 0 主链路与非法 topic / QoS 拒绝 |
 | 发布订阅 | SUBSCRIBE / SUBACK | M1 | A+B+C+D | 已验证 | 已覆盖 MQTT 3.1.1 / MQTT 5 返回码与失败场景 |
 | 发布订阅 | UNSUBSCRIBE / UNSUBACK | M1 | A+B+D | 已验证 | 已覆盖 MQTT 5 reason code 与退订后不再投递 |
