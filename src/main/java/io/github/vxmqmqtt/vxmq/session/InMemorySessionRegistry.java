@@ -5,6 +5,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * In-memory session store used by the early broker milestones.
+ */
 @ApplicationScoped
 public class InMemorySessionRegistry implements SessionRegistry {
 
@@ -20,6 +23,7 @@ public class InMemorySessionRegistry implements SessionRegistry {
     @Override
     public void unbindConnection(String clientId, String connectionId) {
         ClientSession session = sessions.get(clientId);
+        // Avoid disconnecting a newer connection that already took over the same client id.
         if (session != null && connectionId.equals(session.connectionId())) {
             session.unbindConnection();
         }

@@ -4,6 +4,9 @@ import io.github.vxmqmqtt.vxmq.transport.ClientConnection;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 
+/**
+ * Default event sink that exposes broker activity through application logs.
+ */
 @ApplicationScoped
 public class LoggingBrokerEventSink implements BrokerEventSink {
 

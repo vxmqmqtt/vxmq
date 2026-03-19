@@ -29,6 +29,9 @@ import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+/**
+ * End-to-end tests that validate broker behavior through a real MQTT transport.
+ */
 class VertxMqttBrokerTransportIntegrationTest {
 
     private Vertx vertx;
@@ -149,6 +152,9 @@ class VertxMqttBrokerTransportIntegrationTest {
         disconnect.await().atMost(java.time.Duration.ofSeconds(5));
     }
 
+    /**
+     * Test configuration that binds to an ephemeral local port.
+     */
     private record TestBrokerRuntimeConfig() implements BrokerRuntimeConfig {
 
         @Override
@@ -177,6 +183,9 @@ class VertxMqttBrokerTransportIntegrationTest {
         }
     }
 
+    /**
+     * Test double used to silence broker event logging during integration tests.
+     */
     private static final class NoOpBrokerEventSink implements BrokerEventSink {
 
         @Override

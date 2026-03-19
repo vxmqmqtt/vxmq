@@ -32,6 +32,9 @@ import java.util.List;
 import java.util.UUID;
 import io.vertx.mqtt.messages.codes.MqttSubAckReasonCode;
 
+/**
+ * Default in-memory protocol engine for the current single-node milestone.
+ */
 @ApplicationScoped
 public class DefaultProtocolEngine implements ProtocolEngine {
 
@@ -59,6 +62,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
 
     @Override
     public ConnectDecision handleConnect(ClientConnection connection, ConnectRequest request) {
+        // Reject unsupported protocol names or versions before any state is mutated.
         if (!"MQTT".equals(request.protocolName()) || (!request.isMqtt311() && !request.isMqtt5())) {
             brokerEventSink.protocolWarning(connection, "Unsupported protocol version: " + request.protocolVersion());
             return ConnectDecision.reject(rejectUnsupportedProtocolVersion(request));
@@ -78,6 +82,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         MqttProperties responseProperties = buildConnectResponseProperties(request, effectiveClientId);
         connection.assignClientId(effectiveClientId);
         connection.transitionTo(ConnectionState.CONNECTED);
+        // A new connection with the same client identifier replaces the old one.
         String supersededConnectionId = connectionRegistry.bindClientId(effectiveClientId, connection.internalId())
                 .orElse(null);
         sessionRegistry.bindConnection(effectiveClientId, connection.internalId());
@@ -111,6 +116,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 brokerEventSink.subscriptionAdded(connection, topicFilter);
                 results.add(SubscriptionItemResult.granted(topicFilter, MqttQoS.AT_MOST_ONCE));
             } catch (RuntimeException exception) {
+                // Roll back the session view if the routing registry write fails.
                 sessionRegistry.removeSubscription(connection.effectiveClientId(), topicFilter);
                 brokerEventSink.protocolWarning(connection, "Failed to register subscription: " + topicFilter);
                 results.add(SubscriptionItemResult.rejected(topicFilter, MqttSubAckReasonCode.UNSPECIFIED_ERROR));
@@ -130,6 +136,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             }
 
             try {
+                // Both registries are cleaned up so MQTT 5 can report whether anything existed.
                 boolean removedFromSession = sessionRegistry.removeSubscription(connection.effectiveClientId(), topicFilter);
                 boolean removedFromRouting = subscriptionRegistry.removeSubscription(connection.effectiveClientId(), topicFilter);
                 if (removedFromSession || removedFromRouting) {
@@ -185,10 +192,12 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     }
 
     private String resolveClientId(ConnectRequest request) {
+        // Explicit client identifiers always win over auto-assignment.
         if (request.requestedClientId() != null && !request.requestedClientId().isBlank()) {
             return request.requestedClientId();
         }
 
+        // MQTT 3.1.1 requires a persistent session to carry a non-empty client identifier.
         if (request.isMqtt311() && !request.cleanSession()) {
             return null;
         }
@@ -205,6 +214,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     }
 
     private MqttProperties buildConnectResponseProperties(ConnectRequest request, String effectiveClientId) {
+        // Assigned Client Identifier is only required for MQTT 5 auto-generated client ids.
         if (!request.isMqtt5() || (request.requestedClientId() != null && !request.requestedClientId().isBlank())) {
             return MqttProperties.NO_PROPERTIES;
         }

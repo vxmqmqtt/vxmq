@@ -8,6 +8,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * In-memory subscription index used by the single-node milestone.
+ */
 @ApplicationScoped
 public class InMemorySubscriptionRegistry implements SubscriptionRegistry {
 
@@ -20,6 +23,7 @@ public class InMemorySubscriptionRegistry implements SubscriptionRegistry {
 
     @Override
     public void addSubscription(SubscriptionBinding subscriptionBinding) {
+        // Keep only one binding per client and filter so later subscriptions replace earlier ones.
         subscriptionsByFilter
                 .computeIfAbsent(subscriptionBinding.topicFilter(), ignored -> ConcurrentHashMap.newKeySet())
                 .removeIf(binding -> binding.clientId().equals(subscriptionBinding.clientId()));
@@ -50,6 +54,7 @@ public class InMemorySubscriptionRegistry implements SubscriptionRegistry {
                 continue;
             }
             for (SubscriptionBinding binding : entry.getValue()) {
+                // When overlapping filters match the same client, keep a single delivery target.
                 deduplicated.merge(binding.clientId(), binding, (left, right) ->
                         left.requestedQos() >= right.requestedQos() ? left : right);
             }

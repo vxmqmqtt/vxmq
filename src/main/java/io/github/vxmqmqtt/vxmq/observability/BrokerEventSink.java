@@ -2,6 +2,9 @@ package io.github.vxmqmqtt.vxmq.observability;
 
 import io.github.vxmqmqtt.vxmq.transport.ClientConnection;
 
+/**
+ * Receives broker lifecycle and protocol events for logging or metrics.
+ */
 public interface BrokerEventSink {
 
     void transportStarted(String host, int port);

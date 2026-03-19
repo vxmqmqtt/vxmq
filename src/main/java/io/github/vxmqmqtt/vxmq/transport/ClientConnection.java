@@ -2,6 +2,9 @@ package io.github.vxmqmqtt.vxmq.transport;
 
 import java.util.Objects;
 
+/**
+ * Broker-side view of a transport connection and its negotiated MQTT identity.
+ */
 public final class ClientConnection {
 
     private final String internalId;
@@ -29,6 +32,9 @@ public final class ClientConnection {
         this.state = ConnectionState.NEW;
     }
 
+    /**
+     * Returns the broker-generated internal connection identifier.
+     */
     public String internalId() {
         return internalId;
     }
@@ -57,6 +63,9 @@ public final class ClientConnection {
         return effectiveClientId;
     }
 
+    /**
+     * Stores the final client identifier assigned after CONNECT validation.
+     */
     public void assignClientId(String clientId) {
         this.effectiveClientId = clientId;
     }
@@ -65,6 +74,9 @@ public final class ClientConnection {
         return state;
     }
 
+    /**
+     * Records the current lifecycle state of the transport connection.
+     */
     public void transitionTo(ConnectionState newState) {
         this.state = Objects.requireNonNull(newState, "newState");
     }

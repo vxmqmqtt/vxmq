@@ -34,6 +34,9 @@ import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+/**
+ * Unit tests for protocol decisions without starting the transport layer.
+ */
 class DefaultProtocolEngineTest {
 
     private ClientConnectionRegistry connectionRegistry;
@@ -268,6 +271,9 @@ class DefaultProtocolEngineTest {
         return connection;
     }
 
+    /**
+     * Test double used to keep assertions focused on protocol outcomes.
+     */
     private static final class NoOpBrokerEventSink implements BrokerEventSink {
 
         @Override

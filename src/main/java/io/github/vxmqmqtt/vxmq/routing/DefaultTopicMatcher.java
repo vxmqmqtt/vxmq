@@ -2,6 +2,9 @@ package io.github.vxmqmqtt.vxmq.routing;
 
 import jakarta.enterprise.context.ApplicationScoped;
 
+/**
+ * Minimal MQTT topic matcher covering wildcard validation and matching rules for M1.
+ */
 @ApplicationScoped
 public class DefaultTopicMatcher implements TopicMatcher {
 
@@ -11,6 +14,7 @@ public class DefaultTopicMatcher implements TopicMatcher {
             return false;
         }
 
+        // MQTT wildcards must occupy the whole topic level, and '#' can only appear at the end.
         String[] levels = topicFilter.split("/", -1);
         for (int i = 0; i < levels.length; i++) {
             String level = levels[i];
@@ -40,6 +44,7 @@ public class DefaultTopicMatcher implements TopicMatcher {
         int filterIndex = 0;
         int topicIndex = 0;
 
+        // Walk both topic paths together and stop early on mismatch or multi-level wildcard.
         while (filterIndex < filterLevels.length && topicIndex < topicLevels.length) {
             String filterLevel = filterLevels[filterIndex];
             if ("#".equals(filterLevel)) {

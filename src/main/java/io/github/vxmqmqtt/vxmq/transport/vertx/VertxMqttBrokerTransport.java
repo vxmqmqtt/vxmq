@@ -16,7 +16,6 @@ import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeRequest;
 import io.github.vxmqmqtt.vxmq.transport.BrokerTransport;
 import io.github.vxmqmqtt.vxmq.transport.ClientConnection;
 import io.github.vxmqmqtt.vxmq.transport.ClientConnectionRegistry;
-import io.netty.handler.codec.mqtt.MqttQoS;
 import io.netty.handler.codec.mqtt.MqttProperties;
 import io.smallrye.mutiny.Uni;
 import io.vertx.mqtt.messages.codes.MqttDisconnectReasonCode;
@@ -27,11 +26,13 @@ import io.vertx.mutiny.core.Vertx;
 import io.vertx.mutiny.mqtt.MqttEndpoint;
 import io.vertx.mutiny.mqtt.MqttServer;
 import jakarta.enterprise.context.ApplicationScoped;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
+/**
+ * Vert.x MQTT transport implementation that bridges network events to the protocol engine.
+ */
 @ApplicationScoped
 public class VertxMqttBrokerTransport implements BrokerTransport {
 
@@ -62,6 +63,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
             return Uni.createFrom().voidItem();
         }
 
+        // Transport limits are configured centrally so tests and runtime share the same behavior.
         MqttServerOptions options = new MqttServerOptions()
                 .setHost(brokerRuntimeConfig.host())
                 .setPort(brokerRuntimeConfig.port())
@@ -110,6 +112,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
         endpoint.setClientIdentifier(decision.effectiveClientId());
         endpoint.accept(decision.sessionPresent(), decision.responseProperties());
         endpointsByConnectionId.put(connection.internalId(), endpoint);
+        // The transport closes the old socket after the new client id binding is accepted.
         if (decision.supersededConnectionId() != null) {
             closeSupersededConnection(decision.supersededConnectionId());
         }
@@ -130,6 +133,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                 return;
             }
 
+            // Delivery fan-out stays in the transport because it needs access to live endpoints.
             publishResult.deliveries()
                     .forEach(delivery -> sendPublishToSubscriber(delivery, message.topicName(), message.payload(), message.isRetain()));
         });
@@ -186,6 +190,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
             String topicName,
             Buffer payload,
             boolean retain) {
+        // Re-resolve the active connection to avoid publishing to a client that has been taken over.
         connectionRegistry.findActiveConnectionId(delivery.clientId())
                 .map(endpointsByConnectionId::get)
                 .ifPresent(endpoint ->
@@ -203,6 +208,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
             ClientConnection connection,
             MqttEndpoint endpoint,
             MqttDisconnectReasonCode reasonCode) {
+        // MQTT 5 can signal a precise reason code, while older versions fall back to closing the socket.
         if (connection.protocolVersion() == 5 && reasonCode != null) {
             endpoint.disconnect(reasonCode, MqttProperties.NO_PROPERTIES);
             return;
@@ -218,6 +224,9 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
         return auth != null && auth.getPassword() != null;
     }
 
+    /**
+     * Exposes the actual listening port for integration tests that use an ephemeral port.
+     */
     int actualPort() {
         MqttServer server = mqttServer;
         return server == null ? -1 : server.actualPort();

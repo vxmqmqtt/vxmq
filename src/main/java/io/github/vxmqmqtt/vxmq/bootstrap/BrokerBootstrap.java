@@ -8,6 +8,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
 import org.jboss.logging.Logger;
 
+/**
+ * Starts and stops the broker transport with the Quarkus application lifecycle.
+ */
 @ApplicationScoped
 public class BrokerBootstrap {
 
@@ -21,6 +24,9 @@ public class BrokerBootstrap {
         this.brokerTransport = brokerTransport;
     }
 
+    /**
+     * Boots the transport only when the broker is enabled in configuration.
+     */
     void onStart(@Observes StartupEvent event) {
         if (!brokerRuntimeConfig.enabled()) {
             LOG.info("VXMQ MQTT broker is disabled by configuration");
@@ -30,6 +36,9 @@ public class BrokerBootstrap {
         brokerTransport.start().await().indefinitely();
     }
 
+    /**
+     * Stops the transport before the Quarkus process exits.
+     */
     void onStop(@Observes ShutdownEvent event) {
         if (!brokerRuntimeConfig.enabled()) {
             return;

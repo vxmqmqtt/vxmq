@@ -5,6 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+/**
+ * Verifies the minimal topic matching rules used by the in-memory router.
+ */
 class DefaultTopicMatcherTest {
 
     private final DefaultTopicMatcher matcher = new DefaultTopicMatcher();
