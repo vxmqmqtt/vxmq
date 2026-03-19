@@ -181,6 +181,10 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
     private void closeSupersededConnection(String connectionId) {
         MqttEndpoint supersededEndpoint = endpointsByConnectionId.remove(connectionId);
         if (supersededEndpoint != null && supersededEndpoint.isConnected()) {
+            if (supersededEndpoint.protocolVersion() == 5) {
+                supersededEndpoint.disconnect(MqttDisconnectReasonCode.SESSION_TAKEN_OVER, MqttProperties.NO_PROPERTIES);
+                return;
+            }
             supersededEndpoint.close();
         }
     }
