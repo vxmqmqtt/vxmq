@@ -181,11 +181,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
     private void closeSupersededConnection(String connectionId) {
         MqttEndpoint supersededEndpoint = endpointsByConnectionId.remove(connectionId);
         if (supersededEndpoint != null && supersededEndpoint.isConnected()) {
-            if (supersededEndpoint.protocolVersion() == 5) {
-                supersededEndpoint.disconnect(MqttDisconnectReasonCode.SESSION_TAKEN_OVER, MqttProperties.NO_PROPERTIES);
-                return;
-            }
-            supersededEndpoint.close();
+            closeEndpointWithMqtt5Reason(supersededEndpoint, MqttDisconnectReasonCode.SESSION_TAKEN_OVER);
         }
     }
 
@@ -214,6 +210,17 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
             MqttDisconnectReasonCode reasonCode) {
         // MQTT 5 can signal a precise reason code, while older versions fall back to closing the socket.
         if (connection.protocolVersion() == 5 && reasonCode != null) {
+            endpoint.disconnect(reasonCode, MqttProperties.NO_PROPERTIES);
+            return;
+        }
+        endpoint.close();
+    }
+
+    /**
+     * Sends a MQTT 5 DISCONNECT when the protocol supports it, otherwise just closes the socket.
+     */
+    static void closeEndpointWithMqtt5Reason(MqttEndpoint endpoint, MqttDisconnectReasonCode reasonCode) {
+        if (endpoint.protocolVersion() == 5 && reasonCode != null) {
             endpoint.disconnect(reasonCode, MqttProperties.NO_PROPERTIES);
             return;
         }

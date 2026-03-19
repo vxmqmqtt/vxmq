@@ -37,17 +37,17 @@
 
 | 类别 | 特性 | 阶段 | 验收 | 状态 | 备注 |
 | --- | --- | --- | --- | --- | --- |
-| 连接管理 | CONNECT / CONNACK | M1 | A+B+C+D | 未开始 | 含协议级校验、返回码、基础属性 |
-| 连接管理 | Keep Alive | M1 | A+B+D | 未开始 | 含超时探测与断连处理 |
-| 连接管理 | Client Identifier 规则 | M1 | A+B+D | 未开始 | 含重复连接替换策略 |
+| 连接管理 | CONNECT / CONNACK | M1 | A+B+C+D | 已验证 | 已支持 MQTT 3.1.1 / MQTT 5 基础连接、空 clientId 分支与重复连接接管 |
+| 连接管理 | Keep Alive | M1 | A+B+D | 已验证 | 依赖 `vertx-mqtt` 内置 1.5 倍超时探测与断连处理 |
+| 连接管理 | Client Identifier 规则 | M1 | A+B+D | 已验证 | 已支持自动分配与重复连接替换策略 |
 | 连接管理 | Clean Start / Session Expiry | M2 | A+B+C+D | 未开始 | MQTT 5 会话关键语义 |
-| 连接管理 | Disconnect 语义 | M1 | A+B+D | 未开始 | 含正常与异常断连 |
-| 发布订阅 | PUBLISH 基础流程 | M1 | A+B+C+D | 未开始 | 含 DUP / RETAIN / QoS 标志校验 |
-| 发布订阅 | SUBSCRIBE / SUBACK | M1 | A+B+C+D | 未开始 | 含返回码与失败场景 |
-| 发布订阅 | UNSUBSCRIBE / UNSUBACK | M1 | A+B+D | 未开始 |  |
-| 发布订阅 | Topic Filter / Wildcard | M1 | A+B+C+D | 未开始 | `+` / `#` 匹配语义 |
+| 连接管理 | Disconnect 语义 | M1 | A+B+D | 已实现 | 已覆盖主动断连、接管断连、Keep Alive 超时与基础异常断连 |
+| 发布订阅 | PUBLISH 基础流程 | M1 | A+B+C+D | 已验证 | 当前聚焦 QoS 0 主链路与非法 topic / QoS 拒绝 |
+| 发布订阅 | SUBSCRIBE / SUBACK | M1 | A+B+C+D | 已验证 | 已覆盖 MQTT 3.1.1 / MQTT 5 返回码与失败场景 |
+| 发布订阅 | UNSUBSCRIBE / UNSUBACK | M1 | A+B+D | 已验证 | 已覆盖 MQTT 5 reason code 与退订后不再投递 |
+| 发布订阅 | Topic Filter / Wildcard | M1 | A+B+C+D | 已验证 | `+` / `#` 匹配与非法过滤器校验已测试 |
 | 发布订阅 | Shared Subscription | M5 | A+B+C+D | 未开始 | 高级分发能力，后置 |
-| QoS | QoS 0 | M1 | A+B+C+D | 未开始 | 最小消息通路 |
+| QoS | QoS 0 | M1 | A+B+C+D | 已验证 | 最小消息通路已打通 |
 | QoS | QoS 1 | M2 | A+B+C+D | 未开始 | PUBACK 流程与重传语义 |
 | QoS | QoS 2 | M2 | A+B+C+D | 未开始 | PUBREC / PUBREL / PUBCOMP |
 | 状态管理 | Session State | M2 | A+B+C+D | 未开始 | 订阅、未完成消息、过期策略 |

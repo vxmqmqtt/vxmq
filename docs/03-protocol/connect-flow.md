@@ -139,12 +139,15 @@ TCP connected
 ## Keep Alive 初始化
 
 - 从 CONNECT 中读取 Keep Alive 值。
-- 若值大于 0，则启动读空闲检测。
+- 若值大于 0，则依赖 `vertx-mqtt` 内置的空闲检测。
+- 超时阈值按 `Keep Alive * 1.5` 计算。
 - 超时后按异常断连处理。
 
-`M1` 暂定规则：
+`M1` 当前规则：
 
-- 保留一处统一的“连接超时关闭”入口，避免超时关闭与主动断连分散实现。
+- `vertx-mqtt` 在 CONNECT 完成后自动安装 Keep Alive 超时检测。
+- `PINGREQ -> PINGRESP` 默认由 `vertx-mqtt` 自动处理。
+- Keep Alive 超时路径按连接关闭处理，不在 broker 中重复实现第二套计时器。
 
 ## 成功返回
 
@@ -212,4 +215,3 @@ NEW
 ## 待确认项
 
 - CONNECT 失败时具体返回码策略是否在 `M1` 完整实现。
-- Keep Alive 超时阈值是否严格按规范倍数执行。
