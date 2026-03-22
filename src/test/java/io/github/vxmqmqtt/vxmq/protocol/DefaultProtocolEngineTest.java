@@ -60,6 +60,7 @@ class DefaultProtocolEngineTest {
                 connectionRegistry);
     }
 
+    // Verifies that MQTT 3.1.1 rejects empty client ids when the session is not clean.
     @Test
     void shouldRejectEmptyClientIdForPersistentMqtt311Session() {
         ClientConnection connection = connectionRegistry.open("127.0.0.1", "", "MQTT", 4, false);
@@ -76,6 +77,7 @@ class DefaultProtocolEngineTest {
         assertEquals(MqttConnectReturnCode.CONNECTION_REFUSED_IDENTIFIER_REJECTED, decision.returnCode());
     }
 
+    // Verifies that MQTT 3.1.1 clean sessions can receive an auto-generated client id.
     @Test
     void shouldAssignClientIdForMqtt311CleanSession() {
         ClientConnection connection = connectionRegistry.open("127.0.0.1", "", "MQTT", 4, true);
@@ -94,6 +96,7 @@ class DefaultProtocolEngineTest {
         assertTrue(decision.responseProperties().isEmpty());
     }
 
+    // Verifies that MQTT 5 returns Assigned Client Identifier when the broker generates the id.
     @Test
     void shouldAssignClientIdAndConnAckPropertyForMqtt5() {
         ClientConnection connection = connectionRegistry.open("127.0.0.1", "", "MQTT", 5, true);
@@ -114,6 +117,7 @@ class DefaultProtocolEngineTest {
         assertEquals(decision.effectiveClientId(), assignedClientIdProperty.value());
     }
 
+    // Verifies that a second connection with the same client id marks the previous one as superseded.
     @Test
     void shouldMarkPreviousConnectionForTakeOver() {
         ClientConnection firstConnection = connectionRegistry.open("127.0.0.1", "client-a", "MQTT", 5, true);
@@ -140,6 +144,7 @@ class DefaultProtocolEngineTest {
         assertEquals(firstConnection.internalId(), secondDecision.supersededConnectionId());
     }
 
+    // Verifies that valid subscriptions are accepted and normalized to the currently supported QoS 0 path.
     @Test
     void shouldGrantQos0ForValidSubscription() {
         ClientConnection connection = connectClient("client-sub", 5);
@@ -154,6 +159,7 @@ class DefaultProtocolEngineTest {
         assertEquals(1, subscriptionRegistry.match("sensors/room-1/temperature").size());
     }
 
+    // Verifies that invalid topic filters are rejected without mutating session state.
     @Test
     void shouldRejectInvalidSubscriptionFilter() {
         ClientConnection connection = connectClient("client-invalid-sub", 5);
@@ -167,6 +173,7 @@ class DefaultProtocolEngineTest {
         assertTrue(sessionRegistry.find("client-invalid-sub").orElseThrow().subscriptions().isEmpty());
     }
 
+    // Verifies that unsubscribe removes state from both the session registry and routing registry.
     @Test
     void shouldRemoveExistingSubscriptionOnUnsubscribe() {
         ClientConnection connection = connectClient("client-unsub", 5);
@@ -183,6 +190,7 @@ class DefaultProtocolEngineTest {
         assertTrue(subscriptionRegistry.match("sensors/room-1/temperature").isEmpty());
     }
 
+    // Verifies that unsubscribing an unknown filter returns a non-error MQTT 5 reason code.
     @Test
     void shouldReportNoSubscriptionExistedOnUnsubscribe() {
         ClientConnection connection = connectClient("client-unsub-missing", 5);
@@ -195,6 +203,7 @@ class DefaultProtocolEngineTest {
         assertEquals(MqttUnsubAckReasonCode.NO_SUBSCRIPTION_EXISTED, result.itemResults().getFirst().reasonCode());
     }
 
+    // Verifies that invalid filters are rejected during unsubscribe as well.
     @Test
     void shouldRejectInvalidUnsubscribeFilter() {
         ClientConnection connection = connectClient("client-unsub-invalid", 5);
@@ -207,6 +216,7 @@ class DefaultProtocolEngineTest {
         assertEquals(MqttUnsubAckReasonCode.TOPIC_FILTER_INVALID, result.itemResults().getFirst().reasonCode());
     }
 
+    // Verifies that a published message is routed to the matching subscriber set.
     @Test
     void shouldRoutePublishToMatchedSubscribers() {
         ClientConnection publisher = connectClient("publisher", 5);
@@ -227,6 +237,7 @@ class DefaultProtocolEngineTest {
         assertEquals(MqttQoS.AT_MOST_ONCE, result.deliveries().getFirst().grantedQos());
     }
 
+    // Verifies that topic names containing subscription wildcards are rejected for publish.
     @Test
     void shouldRejectPublishWithInvalidTopicName() {
         ClientConnection publisher = connectClient("publisher-invalid-topic", 5);
@@ -243,6 +254,7 @@ class DefaultProtocolEngineTest {
         assertEquals(MqttDisconnectReasonCode.TOPIC_NAME_INVALID, result.disconnectReasonCode());
     }
 
+    // Verifies that inbound QoS levels above the M1 support boundary are rejected.
     @Test
     void shouldRejectPublishWithUnsupportedQos() {
         ClientConnection publisher = connectClient("publisher-qos1", 5);
@@ -259,6 +271,7 @@ class DefaultProtocolEngineTest {
         assertEquals(MqttDisconnectReasonCode.QOS_NOT_SUPPORTED, result.disconnectReasonCode());
     }
 
+    // Verifies that an explicit disconnect unbinds the current session from its live connection.
     @Test
     void shouldUnbindSessionWhenClientDisconnects() {
         ClientConnection connection = connectClient("disconnect-client", 5);
@@ -269,6 +282,7 @@ class DefaultProtocolEngineTest {
         assertNull(sessionRegistry.find("disconnect-client").orElseThrow().connectionId());
     }
 
+    // Verifies that closing a superseded connection does not accidentally unbind the newer takeover session.
     @Test
     void shouldKeepNewSessionBindingWhenSupersededConnectionCloses() {
         ClientConnection firstConnection = connectClient("takeover-client", 5);

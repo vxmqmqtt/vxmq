@@ -90,6 +90,11 @@
 
 - 不做业务语义校验，例如是否允许当前客户端发送某类报文。
 
+当前状态：
+
+- `M1` 代码没有单独实现内部 `codec` 模块，而是直接复用 `vertx-mqtt` 的编解码能力。
+- 若后续需要更细粒度协议控制，再评估是否抽出项目内独立 `codec` 层。
+
 ### 3. connection
 
 职责：
@@ -109,6 +114,10 @@
 边界：
 
 - 连接对象只保存在线期间必需状态，不承担长期会话存储职责。
+
+当前状态：
+
+- `M1` 中 `connection` 相关对象位于 `transport` 包内，尚未抽成独立顶层模块。
 
 ### 4. protocol
 
@@ -169,7 +178,7 @@
 
 建议对象：
 
-- `TopicFilterMatcher`
+- `TopicMatcher`
 - `SubscriptionRegistry`
 - `RouteResult`
 
@@ -216,9 +225,12 @@
 包括：
 
 - 当前网络连接是否存活。
-- Keep Alive 计时信息。
 - 当前连接状态。
 - 当前连接关联的认证结果。
+
+说明：
+
+- Keep Alive 超时检测当前由 `vertx-mqtt` 内置机制负责，不在项目代码中单独维护第二套计时状态。
 
 ### 会话级状态
 
@@ -249,7 +261,7 @@
 ## 建议调用方向
 
 ```text
-transport -> codec -> protocol
+transport -> protocol
 protocol -> auth
 protocol -> connection
 protocol -> session
@@ -275,12 +287,12 @@ PublishRequest 1 -> RouteResult -> 0..n Session
 
 ## M1 实现建议顺序
 
-1. `codec` 与基础报文模型。
-2. `transport` 与连接事件接入。
-3. `ConnectHandler` 和 `connection/session` 最小闭环。
-4. `SubscriptionRegistry` 与主题匹配。
-5. `PublishHandler` 的 QoS 0 主链路。
-6. `UnsubscribeHandler`、`DisconnectHandler`、Keep Alive。
+1. `transport` 与连接事件接入。
+2. `ConnectHandler` 和 `connection/session` 最小闭环。
+3. `SubscriptionRegistry` 与主题匹配。
+4. `PublishHandler` 的 QoS 0 主链路。
+5. `UnsubscribeHandler`、`DisconnectHandler`、Keep Alive。
+6. 若后续协议控制粒度不够，再评估是否补内部 `codec` 层。
 
 ## 待决策项
 

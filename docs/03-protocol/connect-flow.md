@@ -72,7 +72,7 @@ TCP connected
 至少校验以下内容：
 
 - 协议名称是否为 MQTT。
-- 协议级别是否为 5。
+- 协议级别是否为 MQTT 3.1.1 或 MQTT 5。
 - 保留标志位是否合法。
 - Client Identifier 是否满足基本格式约束。
 - Keep Alive 数值是否合法。

@@ -15,16 +15,24 @@
 - `M1` 传输栈选择 Vert.x MQTT server，见 `../07-project/decisions/0004-m1-transport-stack-vertx-mqtt.md`。
 - `M1` 主链路采用响应式、非阻塞、event-loop 模型，见 `../07-project/decisions/0005-m1-reactive-event-loop-model.md`。
 
-## 建议的核心模块
+## 当前核心模块
+
+当前代码中已经落地的核心模块：
 
 - `transport`: 网络连接、编解码、连接生命周期钩子。
 - `protocol`: MQTT 报文校验、协议状态流转、返回码与属性处理。
-- `session`: 客户端会话、订阅集、未完成 QoS 消息、过期控制。
-- `routing`: Topic Tree、订阅匹配、共享订阅分发策略。
-- `message-store`: 保留消息、离线消息、持久化抽象。
+- `session`: 客户端会话、订阅集与在线关联关系。
+- `routing`: Topic 匹配与订阅索引。
 - `auth`: 认证与授权扩展点。
-- `observability`: 日志、指标、健康检查、诊断信息。
+- `observability`: 日志与诊断记录点。
+
+## 后续扩展模块
+
+以下模块或能力将在 `M2+` 再引入，不属于当前代码现状：
+
+- `message-store`: 保留消息、离线消息、持久化抽象。
 - `admin`: 管理接口与运行时查询能力。
+- 健康检查、指标与更完整的运维观测能力。
 
 ## 核心流程
 
@@ -41,10 +49,14 @@
 
 1. 接收 PUBLISH。
 2. 校验 Topic、QoS、属性与会话状态。
-3. 写入必要状态。
-4. 路由到匹配订阅者。
-5. 执行 QoS 对应握手。
-6. 更新保留消息或离线消息。
+3. 路由到匹配订阅者。
+4. 对当前 `M1` 仅执行 QoS 0 投递。
+
+`M2+` 将继续补：
+
+- QoS 1 / QoS 2 状态写入与握手。
+- Retained Message。
+- 离线消息。
 
 ### 断连流程
 
@@ -57,7 +69,7 @@
 
 - 内部事件驱动模型与同步调用边界如何划分。
 - 会话状态先以内存实现还是直接抽象持久化接口。
-- Topic Tree 的数据结构选型。
+- Topic Tree 是否在 `M2` 引入独立数据结构。
 - QoS 2 状态机的内部表示形式。
 
 ## 相关文档

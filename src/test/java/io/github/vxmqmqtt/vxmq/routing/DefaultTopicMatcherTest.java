@@ -12,6 +12,7 @@ class DefaultTopicMatcherTest {
 
     private final DefaultTopicMatcher matcher = new DefaultTopicMatcher();
 
+    // Verifies that '+' and '#' follow the expected MQTT wildcard matching behavior.
     @Test
     void shouldMatchWildcardFilters() {
         assertTrue(matcher.matches("sensors/+/temperature", "sensors/room-1/temperature"));
@@ -19,6 +20,7 @@ class DefaultTopicMatcherTest {
         assertFalse(matcher.matches("sensors/+/temperature", "sensors/room-1/humidity"));
     }
 
+    // Verifies that invalid filters and invalid topic names are rejected by validation.
     @Test
     void shouldRejectInvalidFiltersAndTopicNames() {
         assertFalse(matcher.isValidFilter("sensors/#/temperature"));

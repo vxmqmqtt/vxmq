@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
  */
 class VertxMqttBrokerTransportTest {
 
+    // Verifies that MQTT 3.1.1 takeover handling falls back to closing the socket directly.
     @Test
     void shouldCloseMqtt311EndpointDirectly() {
         EndpointProbe probe = new EndpointProbe(4, true);
@@ -27,6 +28,7 @@ class VertxMqttBrokerTransportTest {
         assertFalse(probe.disconnectCalled);
     }
 
+    // Verifies that MQTT 5 takeover handling sends a DISCONNECT with the supplied reason code.
     @Test
     void shouldDisconnectMqtt5EndpointWithReasonCode() {
         EndpointProbe probe = new EndpointProbe(5, true);

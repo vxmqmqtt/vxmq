@@ -54,6 +54,7 @@ class VertxMqttBrokerTransportIntegrationTest {
         }
     }
 
+    // Verifies the end-to-end happy path: connect, subscribe, publish, and receive one message.
     @Test
     void shouldDeliverPublishedMessageToSubscribedClient() throws ExecutionException, InterruptedException, TimeoutException {
         int port = startBroker();
@@ -77,6 +78,7 @@ class VertxMqttBrokerTransportIntegrationTest {
         assertEquals("payload", receivedPayload.get(5, TimeUnit.SECONDS));
     }
 
+    // Verifies that a second connection with the same client id causes the old connection to close.
     @Test
     void shouldClosePreviousConnectionWhenClientIdIsTakenOver() throws ExecutionException, InterruptedException, TimeoutException {
         int port = startBroker();
@@ -93,6 +95,7 @@ class VertxMqttBrokerTransportIntegrationTest {
         assertTrue(duplicateClient.isConnected());
     }
 
+    // Verifies that unsubscribing removes the delivery path and later publishes no longer arrive.
     @Test
     void shouldStopDeliveringMessagesAfterUnsubscribe() throws Exception {
         int port = startBroker();
@@ -117,6 +120,7 @@ class VertxMqttBrokerTransportIntegrationTest {
         assertThrows(TimeoutException.class, () -> receivedPayload.get(1, TimeUnit.SECONDS));
     }
 
+    // Verifies that the built-in vertx-mqtt Keep Alive handling closes idle clients.
     @Test
     void shouldCloseIdleClientWhenKeepAliveExpires() throws Exception {
         int port = startBroker();
@@ -130,6 +134,7 @@ class VertxMqttBrokerTransportIntegrationTest {
         assertFalse(subscriber.isConnected());
     }
 
+    // Verifies that an unsupported inbound QoS triggers an abnormal disconnect.
     @Test
     void shouldCloseClientAfterUnsupportedQos1Publish() throws Exception {
         int port = startBroker();
