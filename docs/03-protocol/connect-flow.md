@@ -1,217 +1,68 @@
 # CONNECT 流程
 
-本文档定义 `M1` 阶段客户端建立连接的处理流程，覆盖：
+本文档描述 Broker 对 CONNECT 的长期处理规则。当前完成度看 [`../01-status/mqtt5-feature-matrix.md`](../01-status/mqtt5-feature-matrix.md)。
 
-- CONNECT 接入与校验。
-- CONNACK 返回。
-- 重复 `clientId` 处理。
-- Keep Alive 初始化。
-- 拒绝路径与异常断开。
+## 目的与范围
 
-## 目标
+- 接收并校验 CONNECT
+- 建立 `clientId` 与连接的关系
+- 处理重复 `clientId` 的连接接管
+- 返回 CONNACK 或拒绝连接
 
-`M1` 的连接流程要保证两件事：
+## 输入报文与关键字段
 
-1. 协议行为正确，能稳定完成 MQTT 客户端接入。
-2. 流程边界清晰，后续能自然扩展到 `M2` 的会话恢复和 `M3` 的鉴权增强。
-
-## 输入与输出
-
-输入：
-
-- TCP 连接建立事件。
-- 客户端发送的 CONNECT 报文。
-
-输出：
-
-- 成功时返回 CONNACK，并将连接置为 `CONNECTED`。
-- 失败时返回适当错误响应或直接关闭连接。
-
-## 前置约束
-
-- 一个网络连接在收到合法 CONNECT 前，不应接收其他 MQTT 控制报文。
-- 同一连接只允许一次成功 CONNECT。
-- `M1` 默认不恢复持久会话，但必须为后续恢复流程预留位置。
-
-## 流程总览
-
-```text
-TCP connected
-  -> read CONNECT
-  -> decode and basic validation
-  -> protocol validation
-  -> auth hook
-  -> clientId resolution
-  -> duplicate client handling
-  -> create/bind session
-  -> init keep alive
-  -> send CONNACK
-  -> enter CONNECTED state
-```
-
-## 详细步骤
-
-### 1. 连接建立
-
-- `transport` 创建 `ClientConnection`。
-- 初始状态设为 `NEW`。
-- 连接进入“等待 CONNECT 报文”阶段。
-
-### 2. 接收并解码 CONNECT
-
-- `codec` 将字节流解码为 CONNECT 报文对象。
-- 若解码失败，直接关闭连接。
-
-`M1` 规则：
-
-- 报文格式非法时，不尝试继续读取后续报文。
-- 若首个有效报文不是 CONNECT，则关闭连接。
-
-### 3. CONNECT 基础校验
-
-至少校验以下内容：
-
-- 协议名称是否为 MQTT。
-- 协议级别是否为 MQTT 3.1.1 或 MQTT 5。
-- 保留标志位是否合法。
-- Client Identifier 是否满足基本格式约束。
-- Keep Alive 数值是否合法。
-
-`M1` 说明：
-
-- 鉴权可先走默认放行实现。
-- 与 `M2` 相关的 Session Expiry 可先仅解析或明确忽略，但行为要文档化。
-
-### 4. 鉴权扩展点
-
-- `protocol` 调用 `auth` 接口。
-- `M1` 默认实现允许通过。
-
-未来扩展：
-
-- 用户名密码校验。
-- ACL / 授权。
-- 扩展认证机制。
-
-### 5. Client Identifier 解析
-
-处理原则见 `ADR-0002`，按协议版本区分：
-
-- MQTT 3.1.1
-  - 非空 `clientId`：正常处理。
-  - 空 `clientId` + `Clean Session = 1`：接受并生成唯一 `clientId`。
-  - 空 `clientId` + `Clean Session = 0`：返回 `0x02 Identifier rejected` 后关闭连接。
-- MQTT 5
-  - 非空 `clientId`：正常处理。
-  - 空 `clientId`：接受并生成唯一 `clientId`，在 CONNACK 中返回 `Assigned Client Identifier`。
-
-实现要求：
-
-- 服务端生成的 `clientId` 必须在当前 Broker 中唯一。
-- 生成后的 `clientId` 要进入后续会话绑定、重复连接判定和日志链路。
-
-### 6. 重复 clientId 处理
-
-当已有在线连接占用相同 `clientId` 时：
-
-1. 标记旧连接进入 `DISCONNECTING`。
-2. 关闭旧连接。
-3. 将新连接绑定到该 `clientId`。
-
-`M1` 约束：
-
-- 必须确保任一时刻最多只有一个在线连接持有同一 `clientId`。
-- 旧连接关闭与新连接绑定之间要有原子性保证，避免短暂双活。
-
-## 会话绑定
-
-`M1` 处理原则：
-
-- 若该 `clientId` 对应会话不存在，则创建新会话。
-- 若存在会话对象，则复用会话对象，但只保留内存态，不承诺跨重启恢复。
-
-会话最小绑定内容：
-
+- `protocolName`
+- `protocolVersion`
 - `clientId`
-- `connectionId`
-- `connected=true`
+- `cleanSession` / `cleanStart`
+- 用户名密码
+- Keep Alive
 
-## Keep Alive 初始化
+## broker 处理流程
 
-- 从 CONNECT 中读取 Keep Alive 值。
-- 若值大于 0，则依赖 `vertx-mqtt` 内置的空闲检测。
-- 超时阈值按 `Keep Alive * 1.5` 计算。
-- 超时后按异常断连处理。
+1. `transport` 从 `MqttEndpoint` 提取 CONNECT 字段并构造 `ConnectRequest`
+2. `protocol` 校验协议名和协议版本
+3. `protocol` 调用鉴权扩展点
+4. `protocol` 解析有效 `clientId`
+5. `protocol` 更新连接状态、绑定 `clientId`、计算是否存在被接管的旧连接
+6. `transport` 根据协议结果返回 CONNACK，必要时关闭旧连接
 
-`M1` 当前规则：
+## 成功路径
 
-- `vertx-mqtt` 在 CONNECT 完成后自动安装 Keep Alive 超时检测。
-- `PINGREQ -> PINGRESP` 默认由 `vertx-mqtt` 自动处理。
-- Keep Alive 超时路径按连接关闭处理，不在 broker 中重复实现第二套计时器。
-
-## 成功返回
-
-满足条件后：
-
-1. 构造 CONNACK。
-2. 写回客户端。
-3. 将连接状态更新为 `CONNECTED`。
-4. 记录连接成功事件。
-
-`M1` 建议：
-
-- CONNACK 中只返回当前阶段已支持的属性。
-- 对未支持但已解析的属性，应避免伪装成“完整支持”。
+- 连接被接受
+- 连接进入 `CONNECTED`
+- `clientId` 绑定到当前活跃连接
+- 当前会话视图绑定到新连接
+- MQTT 5 且 broker 自动分配 `clientId` 时，在 CONNACK 中返回 `Assigned Client Identifier`
 
 ## 失败路径
 
-### 报文格式非法
+- 协议名或协议版本不支持：拒绝连接
+- `clientId` 不满足当前版本约束：拒绝连接
+- 鉴权失败：拒绝连接
+- 内部异常：关闭连接并记录告警
 
-- 直接关闭连接。
+## 协议版本差异
 
-### 协议级别不支持
+### MQTT 3.1.1
 
-- 返回合适拒绝结果后关闭连接，或按实现约束直接关闭。
+- 空 `clientId` 仅在 `cleanSession=true` 时可被 broker 自动分配
+- 重复 `clientId` 接管时，旧连接直接关闭
 
-### Client Identifier 非法
+### MQTT 5
 
-- 返回拒绝结果并关闭连接。
+- 空 `clientId` 可由 broker 自动分配
+- broker 自动分配 `clientId` 时，在 CONNACK 中返回 `Assigned Client Identifier`
+- 重复 `clientId` 接管时，旧连接使用 `DISCONNECT(Session taken over)` 后关闭
 
-### 鉴权失败
+## Keep Alive
 
-- 返回拒绝结果并关闭连接。
+- Keep Alive 数值从 CONNECT 中读取
+- PINGREQ / PINGRESP 与空闲超时关闭由 `vertx-mqtt` 内置机制处理
+- Broker 不重复实现第二套 Keep Alive 定时逻辑
 
-### 内部异常
+## 当前实现边界
 
-- 记录日志。
-- 关闭连接。
-
-## 状态机
-
-```text
-NEW
- -> CONNECTING
- -> CONNECTED
- -> DISCONNECTING
- -> CLOSED
-```
-
-状态转换说明：
-
-- TCP 建立后进入 `CONNECTING`。
-- CONNECT + CONNACK 成功完成后进入 `CONNECTED`。
-- 主动断开、重复 `clientId` 替换、Keep Alive 超时、写失败都进入 `DISCONNECTING`。
-- 资源释放完成后进入 `CLOSED`。
-
-## M1 验收点
-
-- 合法客户端可成功连接并收到 CONNACK。
-- 首报文不是 CONNECT 时连接被拒绝。
-- 非法协议级别被拒绝。
-- 重复 `clientId` 连接时旧连接被替换。
-- Keep Alive 超时可触发关闭。
-- 集成测试能覆盖成功、拒绝、替换、超时四类路径。
-
-## 待确认项
-
-- CONNECT 失败时具体返回码策略是否在 `M1` 完整实现。
+- 当前未实现 Clean Start / Session Expiry 的完整语义
+- 当前未实现 MQTT 5 更多 CONNECT / CONNACK 属性
+- 当前会话绑定仍是内存态单机实现

@@ -1,37 +1,56 @@
 # 文档导航
 
-本文档目录用于承载 `vxmq` 项目的全部工程文档。除临时讨论外，项目的重要信息都应沉淀到这里。
+`docs/` 是项目文档的唯一入口。这里的文档按三种职责组织：
+
+- `规范真相`：长期稳定、指导实现的文档
+- `当前状态`：集中承载项目目前进行到哪里
+- `历史记录`：ADR、阶段验收等不可替代的留痕文档
+
+## 推荐阅读顺序
+
+1. [`00-foundation/vision.md`](00-foundation/vision.md)
+2. [`00-foundation/scope.md`](00-foundation/scope.md)
+3. [`00-foundation/compatibility.md`](00-foundation/compatibility.md)
+4. [`01-status/current-status.md`](01-status/current-status.md)
+5. [`01-status/mqtt5-feature-matrix.md`](01-status/mqtt5-feature-matrix.md)
+6. [`02-architecture/architecture-overview.md`](02-architecture/architecture-overview.md)
+7. [`03-protocol/connect-flow.md`](03-protocol/connect-flow.md)
+8. [`07-project/collaboration.md`](07-project/collaboration.md)
 
 ## 目录说明
 
-- `00-overview/`: 项目愿景、范围、术语。
-- `01-requirements/`: 功能性与非功能性需求。
-- `02-architecture/`: 架构设计、模块职责、核心流程。
-- `03-protocol/`: MQTT 协议相关设计与实现说明。
-- `04-api-and-config/`: 配置、管理接口、观测接口。
-- `05-testing/`: 测试策略、兼容性与性能验证。
-- `06-operations/`: 部署、运维、安全、故障处理。
-- `07-project/`: 协作规范、路线图、里程碑、决策记录。
+### `00-foundation`
 
-## 当前优先文档
+项目最稳定的基础文档：
 
-1. `00-overview/vision.md`
-2. `00-overview/scope.md`
-3. `01-requirements/mqtt5-feature-matrix.md`
-4. `01-requirements/compatibility.md`
-5. `02-architecture/architecture-overview.md`
-6. `07-project/collaboration.md`
-7. `07-project/milestones.md`
-8. `02-architecture/module-design.md`
-9. `03-protocol/connect-flow.md`
-10. `03-protocol/subscribe-flow.md`
-11. `03-protocol/publish-flow.md`
-12. `02-architecture/topic-routing.md`
-13. `07-project/m1-acceptance-checklist.md`
+- 愿景
+- 范围
+- 协议兼容原则
+- 术语表
 
-## 文档约定
+### `01-status`
 
-- 默认使用中文编写。
-- 文档要区分“已确认”“待确认”“假设”。
-- 重要架构决策应补充到 `07-project/decisions/`。
-- 需求、设计、测试文档之间要互相链接，避免信息孤岛。
+项目状态与阶段规划的集中入口：
+
+- 当前状态
+- 特性矩阵
+- 里程碑规划
+- 已完成阶段的历史验收
+
+### `02-architecture`
+
+系统整体架构、模块边界和 Topic 路由设计。
+
+### `03-protocol`
+
+Broker 对 CONNECT、SUBSCRIBE / UNSUBSCRIBE、PUBLISH 的长期协议行为说明。
+
+### `07-project`
+
+协作规范与 ADR。ADR 属于历史决策记录，不替代稳定规范文档。
+
+## 使用规则
+
+- 当前状态只在 `01-status/` 集中维护，其他设计文档不重复写阶段总结。
+- 设计文档优先追求长期稳定，不承载短期任务清单。
+- 重要实现选择进入 `07-project/decisions/`。

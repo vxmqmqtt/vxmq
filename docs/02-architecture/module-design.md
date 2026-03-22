@@ -1,302 +1,130 @@
 # 模块设计
 
-本文档聚焦 `M1` 最小闭环阶段的模块拆分，目标是在编码前明确：
-
-1. 模块职责边界。
-2. 关键状态归属。
-3. 主要调用方向。
-4. 后续向 `M2+` 演进时的扩展点。
+本文档描述当前代码基础上的模块职责和边界约束。它是长期设计文档，不承担阶段任务拆解与状态汇报职责。
 
 ## 设计原则
 
-- 连接层、协议层、状态层、路由层分离，避免单个类同时承担网络、协议和业务状态职责。
-- 连接级状态与会话级状态分离，避免 `M1` 阶段就把短生命周期对象和长生命周期对象耦合死。
-- 先以内存实现最小闭环，但接口命名与职责要为 `M2/M4` 的持久化和恢复留口。
-- 所有出站报文都应经过统一的编码与发送出口，便于审计和后续限流。
-- 主链路默认运行在 Vert.x event loop 上，因此 `M1` 热路径必须保持非阻塞。
+- 状态归属清晰：连接级、会话级、路由级状态各自有唯一所有者。
+- 分层单向：网络事件进入 `transport`，协议决策集中在 `protocol`，状态更新落在 `session` 与 `routing`。
+- 宿主与核心分离：Quarkus 管生命周期和依赖注入，Broker 核心逻辑尽量不向下扩散框架细节。
+- 传输层可使用 Mutiny / Vert.x 类型，核心领域层优先使用纯 Java 模型。
+- 主链路保持非阻塞，避免在 event loop 上引入阻塞式 IO。
 
-## 已确定约束
+## 当前模块
 
-- `transport` 入口使用 Vert.x MQTT server，见 `ADR-0004`。
-- `M1` 主链路采用响应式、非阻塞、event-loop 模型，见 `ADR-0005`。
-- 在 Quarkus 中接入 Vert.x 扩展时，优先使用 Mutiny 包装层；仅在没有 Mutiny 变体或需要底层配置对象时才使用原生 Vert.x 类型。
-
-## M1 目标范围
-
-`M1` 需要覆盖：
-
-- CONNECT / CONNACK。
-- PUBLISH 主链路。
-- SUBSCRIBE / SUBACK。
-- UNSUBSCRIBE / UNSUBACK。
-- QoS 0。
-- Topic Filter / Wildcard。
-- Keep Alive 与基础断连处理。
-
-`M1` 明确不做：
-
-- QoS 1 / QoS 2 状态机。
-- 会话持久化恢复。
-- Retained Message。
-- Will Message。
-- Shared Subscription。
-
-## 建议模块
-
-### 1. transport
+### `bootstrap`
 
 职责：
 
-- 管理 TCP 连接生命周期。
-- 接收字节流并交给 MQTT 解码器。
-- 将编码后的报文写回网络连接。
-- 感知连接关闭、读空闲、写异常等连接级事件。
-- 封装 Vert.x MQTT connection，向上暴露项目自己的连接抽象。
+- 监听 Quarkus 启停事件
+- 启动和停止 Broker transport
 
-输入：
+### `config`
 
-- 网络事件。
-- 编码后的响应报文。
+职责：
 
-输出：
+- 提供 broker 监听地址、端口、消息大小限制和连接超时等运行配置
 
-- 解码后的 MQTT 报文。
-- 连接建立 / 关闭 / 空闲事件。
+### `transport`
+
+职责：
+
+- 持有 `MqttServer` 与在线 `MqttEndpoint`
+- 接收 MQTT 报文回调并转换为内部请求对象
+- 将协议处理结果映射为 CONNACK、SUBACK、UNSUBACK、PUBLISH 或断连动作
 
 边界：
 
-- 不负责协议合法性决策。
-- 不负责主题路由和订阅状态。
-- 不把 Vert.x 具体类型泄漏到 `protocol/session/routing` 核心接口。
+- 不保存会话真相
+- 不定义 Topic 匹配规则
+- 不直接修改订阅状态，必须通过 `protocol`
 
-### 2. codec
-
-职责：
-
-- MQTT 报文编解码。
-- 基础报文结构校验，例如固定报头、剩余长度、字段存在性。
-
-输入：
-
-- 字节流。
-- 协议对象。
-
-输出：
-
-- 强类型 MQTT 报文对象。
-- 编码后的二进制数据。
-
-边界：
-
-- 不做业务语义校验，例如是否允许当前客户端发送某类报文。
-
-当前状态：
-
-- `M1` 代码没有单独实现内部 `codec` 模块，而是直接复用 `vertx-mqtt` 的编解码能力。
-- 若后续需要更细粒度协议控制，再评估是否抽出项目内独立 `codec` 层。
-
-### 3. connection
+### `protocol`
 
 职责：
 
-- 表示当前在线连接及其连接级状态。
-- 保存连接关联的 `clientId`、协议版本、Keep Alive 配置、连接状态。
-- 负责连接与 `session` 的关联。
+- 聚合 CONNECT、SUBSCRIBE、UNSUBSCRIBE、PUBLISH、DISCONNECT 的处理决策
+- 组合 `auth`、`session`、`routing` 和 `connectionRegistry`
+- 输出标准化结果模型，供 `transport` 映射为具体报文行为
 
-建议状态：
-
-- `NEW`
-- `CONNECTING`
-- `CONNECTED`
-- `DISCONNECTING`
-- `CLOSED`
-
-边界：
-
-- 连接对象只保存在线期间必需状态，不承担长期会话存储职责。
-
-当前状态：
-
-- `M1` 中 `connection` 相关对象位于 `transport` 包内，尚未抽成独立顶层模块。
-
-### 4. protocol
+### `session`
 
 职责：
 
-- 作为 MQTT 报文入口调度层。
-- 根据报文类型分发到对应处理器。
-- 做协议语义校验和错误码决策。
+- 管理按 `clientId` 归属的会话视图
+- 当前已落地内容包括：绑定连接 ID、订阅集合
+- 为后续扩展 Session Expiry、inflight message、offline message 预留位置
 
-建议拆分：
-
-- `ConnectHandler`
-- `PublishHandler`
-- `SubscribeHandler`
-- `UnsubscribeHandler`
-- `DisconnectHandler`
-
-边界：
-
-- 不直接持有 Topic Tree 或 Session Map 的底层实现细节。
-- 通过接口调用 `session`、`routing`、`auth`、`observability`。
-- 热路径处理必须短小、无阻塞、event-loop 友好。
-
-### 5. session
+### `routing`
 
 职责：
 
-- 管理客户端会话抽象。
-- 在 `M1` 中至少承载客户端订阅集与在线关联关系。
-- 为 `M2` 的 Session Expiry、未完成消息、离线消息预留扩展位。
+- 管理订阅索引
+- 提供 Topic Filter 匹配与订阅查询
+- 支撑发布消息的命中集合解析
 
-建议对象：
-
-- `Session`
-- `SessionRegistry`
-- `SessionBinding`
-
-`M1` 最小字段建议：
-
-- `clientId`
-- `subscriptions`
-- `connected`
-- `connectionId`
-
-边界：
-
-- `M1` 中可以以内存 Map 实现。
-- 不在 `M1` 中承诺跨重启恢复。
-- 默认假设在 event loop 串行上下文中运行；如后续跨线程访问，必须重新定义并发约束。
-
-### 6. routing
+### `auth`
 
 职责：
 
-- 维护 Topic Filter 到订阅者集合的映射。
-- 执行主题匹配，包括精确匹配与 `+`、`#` 通配符。
-- 为发布链路返回目标订阅者列表。
+- 提供连接鉴权扩展点
+- 当前默认实现为 `permit-all`
 
-建议对象：
-
-- `TopicMatcher`
-- `SubscriptionRegistry`
-- `RouteResult`
-
-边界：
-
-- `M1` 只考虑普通订阅，不考虑共享订阅。
-- `M1` 只支持单机内存路由。
-- 匹配与索引更新实现必须避免阻塞操作。
-
-### 7. auth
+### `observability`
 
 职责：
 
-- 提供鉴权扩展点。
-
-`M1` 建议：
-
-- 保留接口。
-- 提供默认放行实现。
-
-原因：
-
-- 避免把连接流程写死。
-- 不阻塞 `M1` 最小闭环。
-
-### 8. observability
-
-职责：
-
-- 记录关键协议事件。
-- 暴露连接数、订阅数、收发报文数等基础指标的扩展点。
-
-`M1` 最小要求：
-
-- 关键连接事件有日志。
-- 协议拒绝路径有结构化记录点。
+- 记录连接接受、协议告警、订阅变更、消息路由等关键事件
+- 为后续日志、指标和诊断输出提供统一出口
 
 ## 关键状态归属
 
 ### 连接级状态
 
-归属：`connection`
+由 `ClientConnection` 和 `ClientConnectionRegistry` 持有：
 
-包括：
-
-- 当前网络连接是否存活。
-- 当前连接状态。
-- 当前连接关联的认证结果。
-
-说明：
-
-- Keep Alive 超时检测当前由 `vertx-mqtt` 内置机制负责，不在项目代码中单独维护第二套计时状态。
+- 内部连接 ID
+- 当前协议版本
+- `clientId`
+- clean session 标志
+- 生命周期状态
+- 当前活跃连接索引
 
 ### 会话级状态
 
-归属：`session`
-
-`M1` 包括：
+由 `SessionRegistry` 持有：
 
 - `clientId`
-- 当前订阅集
-- 连接绑定关系
-
-`M2+` 扩展：
-
-- Session Expiry
-- QoS 未完成流转状态
-- 离线消息
-- Will 配置
+- 当前绑定连接 ID
+- 当前订阅集合
 
 ### 路由级状态
 
-归属：`routing`
+由 `SubscriptionRegistry` 持有：
 
-包括：
+- Topic Filter 到订阅绑定的索引
+- Topic Name 命中结果
 
-- Topic Filter 到订阅者集合的索引。
-- 主题匹配规则实现。
+## 调用方向
 
-## 建议调用方向
+允许的主要调用方向：
 
-```text
-transport -> protocol
-protocol -> auth
-protocol -> connection
-protocol -> session
-protocol -> routing
-protocol -> observability
-protocol -> transport
-```
+- `bootstrap -> transport`
+- `transport -> protocol`
+- `protocol -> auth`
+- `protocol -> session`
+- `protocol -> routing`
+- `protocol -> connectionRegistry`
+- `protocol -> observability`
 
-约束：
+不允许的主要方向：
 
-- `routing` 不反向依赖 `protocol`。
-- `session` 不直接操作网络。
-- `transport` 不直接决定协议返回码。
+- `routing -> transport`
+- `session -> transport`
+- `transport` 绕过 `protocol` 直接修改会话或订阅状态
 
-## M1 核心对象关系
+## 演进约束
 
-```text
-ClientConnection 1 -> 0..1 Session
-Session 1 -> 0..n Subscription
-SubscriptionRegistry 1 -> 0..n Subscription
-PublishRequest 1 -> RouteResult -> 0..n Session
-```
-
-## M1 实现建议顺序
-
-1. `transport` 与连接事件接入。
-2. `ConnectHandler` 和 `connection/session` 最小闭环。
-3. `SubscriptionRegistry` 与主题匹配。
-4. `PublishHandler` 的 QoS 0 主链路。
-5. `UnsubscribeHandler`、`DisconnectHandler`、Keep Alive。
-6. 若后续协议控制粒度不够，再评估是否补内部 `codec` 层。
-
-## 待决策项
-
-- `connection` 是否直接复用 Vert.x/Netty Channel 上下文，还是封装独立对象。
-- Topic Filter 数据结构使用树结构还是“规范化后线性匹配”起步。
-- 协议处理器采用单类分发还是“一个报文类型一个处理器”。
-- 订阅信息同时保存在 `session` 与 `routing` 时如何保证一致性。
+- 若未来引入持久化，不应破坏 `protocol -> session / routing` 的职责边界。
+- 若未来引入 QoS 1 / QoS 2，不应把 inflight 状态机直接塞回 `transport`。
+- 若未来引入更多 MQTT 5 属性映射，可在 `transport` 内部抽出更明确的报文适配层，但当前无需虚构独立 `codec` 模块。

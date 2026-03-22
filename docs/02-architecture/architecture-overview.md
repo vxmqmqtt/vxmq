@@ -1,83 +1,96 @@
 # 架构概览
 
+本文档描述 `vxmq` 的长期架构骨架，强调系统分层、模块边界和演进方向。当前阶段结论统一查看 [`../01-status/current-status.md`](../01-status/current-status.md)。
+
 ## 设计目标
 
-架构设计应满足以下原则：
+- 保持协议主链路与 MQTT 规范语义对齐。
+- 让 Quarkus 负责生命周期、配置和依赖注入，让 Broker 核心逻辑保持清晰边界。
+- 在单机、内存态的实现基础上，为后续会话状态、QoS 可靠性和持久化能力预留扩展空间。
+- 让响应式传输层与核心协议决策层分离，避免把网络 API 直接扩散到所有模块。
 
-1. 协议语义与工程实现分层清晰。
-2. 核心状态有明确归属，避免隐式共享状态扩散。
-3. 便于后续引入持久化、认证鉴权、集群和观测能力。
-4. 便于测试，每个核心模块都应可独立验证。
-5. 主链路遵循响应式、非阻塞、event-loop 友好的实现原则。
+## 已确定的技术约束
 
-## 已确定实现约束
+- 传输栈使用 `Vert.x MQTT server`。
+- 主链路采用响应式、非阻塞、event-loop 模型。
+- 在 Quarkus 中接入 Vert.x 扩展时，优先使用 Mutiny 变体。
 
-- `M1` 传输栈选择 Vert.x MQTT server，见 `../07-project/decisions/0004-m1-transport-stack-vertx-mqtt.md`。
-- `M1` 主链路采用响应式、非阻塞、event-loop 模型，见 `../07-project/decisions/0005-m1-reactive-event-loop-model.md`。
+## 系统分层
 
-## 当前核心模块
+### 宿主层
 
-当前代码中已经落地的核心模块：
+- `bootstrap`
+- `config`
 
-- `transport`: 网络连接、编解码、连接生命周期钩子。
-- `protocol`: MQTT 报文校验、协议状态流转、返回码与属性处理。
-- `session`: 客户端会话、订阅集与在线关联关系。
-- `routing`: Topic 匹配与订阅索引。
-- `auth`: 认证与授权扩展点。
-- `observability`: 日志与诊断记录点。
+职责：对接 Quarkus 生命周期、加载配置、启动和停止 Broker。
 
-## 后续扩展模块
+### 传输层
 
-以下模块或能力将在 `M2+` 再引入，不属于当前代码现状：
+- `transport`
 
-- `message-store`: 保留消息、离线消息、持久化抽象。
-- `admin`: 管理接口与运行时查询能力。
-- 健康检查、指标与更完整的运维观测能力。
+职责：管理 MQTT endpoint、接收网络事件、完成协议报文与内部模型之间的桥接，并负责实际出站写回。
 
-## 核心流程
+### 协议与领域层
 
-### 连接流程
+- `protocol`
+- `session`
+- `routing`
+- `auth`
 
-1. 连接建立。
-2. 报文解码与 CONNECT 校验。
-3. 鉴权与客户端标识处理。
-4. 会话恢复或新建。
-5. 下发 CONNACK。
-6. 进入正常收发阶段。
+职责：承载协议决策、连接与会话状态、订阅管理、Topic 匹配与鉴权扩展点。
 
-### 发布流程
+### 观测层
 
-1. 接收 PUBLISH。
-2. 校验 Topic、QoS、属性与会话状态。
-3. 路由到匹配订阅者。
-4. 对当前 `M1` 仅执行 QoS 0 投递。
+- `observability`
 
-`M2+` 将继续补：
+职责：记录主链路关键事件，为后续日志、指标和诊断能力提供统一出口。
 
-- QoS 1 / QoS 2 状态写入与握手。
-- Retained Message。
-- 离线消息。
+## 当前已落地模块
 
-### 断连流程
+- `bootstrap`: Quarkus 启停桥接
+- `config`: Broker 运行参数
+- `transport`: 基于 Mutiny Vert.x MQTT 的服务端接入
+- `protocol`: CONNECT、SUBSCRIBE、UNSUBSCRIBE、PUBLISH、DISCONNECT 的当前阶段决策
+- `session`: 内存态会话视图
+- `routing`: 内存态订阅索引与 Topic 匹配
+- `auth`: 当前为最小放行实现
+- `observability`: 当前为最小日志事件输出
 
-1. 接收 DISCONNECT 或探测异常断连。
-2. 处理会话过期策略。
-3. 判断是否触发遗嘱消息。
-4. 清理连接级资源。
+## 规划中的扩展方向
 
-## 当前待决策项
+- 会话持久化与恢复
+- QoS 1 / QoS 2 状态机
+- Retained Message
+- Will Message
+- 更完整的鉴权与 ACL
+- 健康检查、指标和运维接口
 
-- 内部事件驱动模型与同步调用边界如何划分。
-- 会话状态先以内存实现还是直接抽象持久化接口。
-- Topic Tree 是否在 `M2` 引入独立数据结构。
-- QoS 2 状态机的内部表示形式。
+## 模块协作主线
+
+### 连接建立
+
+1. `transport` 接收 CONNECT 并转换为内部 `ConnectRequest`
+2. `protocol` 校验协议、鉴权、解析 `clientId` 并给出接管决策
+3. `session` 与 `connectionRegistry` 更新当前连接归属
+4. `transport` 按版本差异返回 CONNACK，并在必要时关闭旧连接
+
+### 发布订阅
+
+1. `transport` 接收 SUBSCRIBE / UNSUBSCRIBE / PUBLISH
+2. `protocol` 完成语义校验并更新 `session`、`routing`
+3. `routing` 解析命中订阅集合
+4. `transport` 根据在线 endpoint 执行实际消息投递
+
+### 断连
+
+1. `transport` 接收主动断连、连接关闭或 Keep Alive 超时事件
+2. `protocol` 更新连接和会话状态
+3. `transport` 清理在线 endpoint 索引
 
 ## 相关文档
 
-- `module-design.md`: `M1` 模块职责、状态归属与调用方向。
-- `topic-routing.md`: `M1` 的 Topic Filter 匹配规则与路由索引设计。
-- `../03-protocol/connect-flow.md`: `M1` 的 CONNECT / CONNACK 处理流程。
-- `../03-protocol/subscribe-flow.md`: `M1` 的订阅与取消订阅处理流程。
-- `../03-protocol/publish-flow.md`: `M1` 的发布与路由处理流程。
-- `../07-project/decisions/0004-m1-transport-stack-vertx-mqtt.md`: `M1` 的传输栈选择。
-- `../07-project/decisions/0005-m1-reactive-event-loop-model.md`: `M1` 的编程范式与线程模型。
+- [`module-design.md`](module-design.md)
+- [`topic-routing.md`](topic-routing.md)
+- [`../03-protocol/connect-flow.md`](../03-protocol/connect-flow.md)
+- [`../03-protocol/subscribe-flow.md`](../03-protocol/subscribe-flow.md)
+- [`../03-protocol/publish-flow.md`](../03-protocol/publish-flow.md)
