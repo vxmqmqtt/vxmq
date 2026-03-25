@@ -1,13 +1,18 @@
-greeting:
-  message: "hello"
-mp:
-  messaging:
-    outgoing:
-      words-out:
-        topic: "words"
-    incoming:
-      words-in:
-        auto:
-          offset:
-            reset: "earliest"
-        topic: "words"
+vxmq:
+  broker:
+    enabled: true
+    host: 0.0.0.0
+    port: 1883
+    max-message-size: 268435455
+    timeout-on-connect-seconds: 10
+
+quarkus:
+  kafka:
+    devservices:
+      enabled: false
+  log:
+    category:
+      "io.github.vxmqmqtt.vxmq":
+        level: INFO
+  devservices:
+    enabled: false

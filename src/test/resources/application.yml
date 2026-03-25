@@ -1,0 +1,10 @@
+vxmq:
+  broker:
+    enabled: false
+
+quarkus:
+  kafka:
+    devservices:
+      enabled: false
+  devservices:
+    enabled: false
