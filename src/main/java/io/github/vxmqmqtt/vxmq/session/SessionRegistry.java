@@ -8,14 +8,19 @@ import java.util.Optional;
 public interface SessionRegistry {
 
     /**
-     * Creates or updates the session binding for an active client connection.
+     * Opens a session for the supplied client, either by restoring an existing one or creating a new one.
      */
-    ClientSession bindConnection(String clientId, String connectionId);
+    SessionOpenResult openSession(String clientId, SessionOpenRequest request);
 
     /**
-     * Unbinds the session only if the supplied connection still owns it.
+     * Applies disconnect/close semantics for the supplied connection owner.
      */
-    void unbindConnection(String clientId, String connectionId);
+    Optional<ClientSession> onConnectionClosed(String clientId, String connectionId);
+
+    /**
+     * Deletes the complete session state for the client if it exists.
+     */
+    Optional<ClientSession> removeSession(String clientId);
 
     /**
      * Adds a topic filter to the client's session state.

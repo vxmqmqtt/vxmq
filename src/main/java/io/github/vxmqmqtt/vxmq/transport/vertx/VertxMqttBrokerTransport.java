@@ -99,7 +99,9 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                 endpoint.clientIdentifier(),
                 endpoint.protocolName(),
                 endpoint.protocolVersion(),
-                endpoint.isCleanSession(),
+                endpoint.protocolVersion() == 4 && endpoint.isCleanSession(),
+                endpoint.protocolVersion() == 5 && endpoint.isCleanSession(),
+                endpoint.protocolVersion() == 5 ? sessionExpiryIntervalSeconds(endpoint.connectProperties()) : null,
                 username(endpoint.auth()),
                 passwordPresent(endpoint.auth())));
 
@@ -233,6 +235,19 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
 
     private boolean passwordPresent(MqttAuth auth) {
         return auth != null && auth.getPassword() != null;
+    }
+
+    private long sessionExpiryIntervalSeconds(MqttProperties connectProperties) {
+        if (connectProperties == null || connectProperties.isEmpty()) {
+            return 0L;
+        }
+
+        MqttProperties.MqttProperty<?> property = connectProperties.getProperty(
+                MqttProperties.MqttPropertyType.SESSION_EXPIRY_INTERVAL.value());
+        if (property == null || property.value() == null) {
+            return 0L;
+        }
+        return ((Number) property.value()).longValue();
     }
 
     /**

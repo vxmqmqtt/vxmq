@@ -65,12 +65,8 @@ class DefaultProtocolEngineTest {
     void shouldRejectEmptyClientIdForPersistentMqtt311Session() {
         ClientConnection connection = connectionRegistry.open("127.0.0.1", "", "MQTT", 4, false);
 
-        ConnectDecision decision = protocolEngine.handleConnect(connection, new ConnectRequest(
+        ConnectDecision decision = protocolEngine.handleConnect(connection, mqtt311Connect(
                 "",
-                "MQTT",
-                4,
-                false,
-                null,
                 false));
 
         assertFalse(decision.accepted());
@@ -82,18 +78,15 @@ class DefaultProtocolEngineTest {
     void shouldAssignClientIdForMqtt311CleanSession() {
         ClientConnection connection = connectionRegistry.open("127.0.0.1", "", "MQTT", 4, true);
 
-        ConnectDecision decision = protocolEngine.handleConnect(connection, new ConnectRequest(
+        ConnectDecision decision = protocolEngine.handleConnect(connection, mqtt311Connect(
                 "",
-                "MQTT",
-                4,
-                true,
-                null,
-                false));
+                true));
 
         assertTrue(decision.accepted());
         assertNotNull(decision.effectiveClientId());
         assertTrue(decision.effectiveClientId().startsWith("vxmq-"));
         assertTrue(decision.responseProperties().isEmpty());
+        assertFalse(decision.sessionPresent());
     }
 
     // Verifies that MQTT 5 returns Assigned Client Identifier when the broker generates the id.
@@ -101,13 +94,10 @@ class DefaultProtocolEngineTest {
     void shouldAssignClientIdAndConnAckPropertyForMqtt5() {
         ClientConnection connection = connectionRegistry.open("127.0.0.1", "", "MQTT", 5, true);
 
-        ConnectDecision decision = protocolEngine.handleConnect(connection, new ConnectRequest(
+        ConnectDecision decision = protocolEngine.handleConnect(connection, mqtt5Connect(
                 "",
-                "MQTT",
-                5,
                 true,
-                null,
-                false));
+                0L));
 
         assertTrue(decision.accepted());
         assertNotNull(decision.effectiveClientId());
@@ -123,20 +113,14 @@ class DefaultProtocolEngineTest {
         ClientConnection firstConnection = connectionRegistry.open("127.0.0.1", "client-a", "MQTT", 5, true);
         ClientConnection secondConnection = connectionRegistry.open("127.0.0.1", "client-a", "MQTT", 5, true);
 
-        ConnectDecision firstDecision = protocolEngine.handleConnect(firstConnection, new ConnectRequest(
+        ConnectDecision firstDecision = protocolEngine.handleConnect(firstConnection, mqtt5Connect(
                 "client-a",
-                "MQTT",
-                5,
                 true,
-                null,
-                false));
-        ConnectDecision secondDecision = protocolEngine.handleConnect(secondConnection, new ConnectRequest(
+                0L));
+        ConnectDecision secondDecision = protocolEngine.handleConnect(secondConnection, mqtt5Connect(
                 "client-a",
-                "MQTT",
-                5,
                 true,
-                null,
-                false));
+                0L));
 
         assertTrue(firstDecision.accepted());
         assertTrue(secondDecision.accepted());
@@ -144,10 +128,102 @@ class DefaultProtocolEngineTest {
         assertEquals(firstConnection.internalId(), secondDecision.supersededConnectionId());
     }
 
+    // Verifies that MQTT 3.1.1 cleanSession=false restores an existing persistent session.
+    @Test
+    void shouldRestorePersistentMqtt311SessionOnReconnect() {
+        ClientConnection firstConnection = connectionRegistry.open("127.0.0.1", "mqtt311-persistent", "MQTT", 4, false);
+        ConnectDecision firstDecision = protocolEngine.handleConnect(firstConnection, mqtt311Connect(
+                "mqtt311-persistent",
+                false));
+        assertTrue(firstDecision.accepted());
+        assertFalse(firstDecision.sessionPresent());
+
+        protocolEngine.handleSubscribe(firstConnection, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 0))));
+        protocolEngine.handleConnectionClosed(firstConnection);
+
+        ClientConnection secondConnection = connectionRegistry.open("127.0.0.1", "mqtt311-persistent", "MQTT", 4, false);
+        ConnectDecision secondDecision = protocolEngine.handleConnect(secondConnection, mqtt311Connect(
+                "mqtt311-persistent",
+                false));
+
+        assertTrue(secondDecision.accepted());
+        assertTrue(secondDecision.sessionPresent());
+        assertTrue(sessionRegistry.find("mqtt311-persistent").orElseThrow().subscriptions().contains("sensors/+/temperature"));
+    }
+
+    // Verifies that MQTT 3.1.1 cleanSession=true always starts with a fresh session.
+    @Test
+    void shouldDiscardExistingSessionForCleanMqtt311Reconnect() {
+        ClientConnection firstConnection = connectClient("mqtt311-clean", 4, true, false, null);
+        protocolEngine.handleSubscribe(firstConnection, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 0))));
+        protocolEngine.handleConnectionClosed(firstConnection);
+
+        ClientConnection secondConnection = connectionRegistry.open("127.0.0.1", "mqtt311-clean", "MQTT", 4, true);
+        ConnectDecision secondDecision = protocolEngine.handleConnect(secondConnection, mqtt311Connect(
+                "mqtt311-clean",
+                true));
+
+        assertTrue(secondDecision.accepted());
+        assertFalse(secondDecision.sessionPresent());
+        assertTrue(sessionRegistry.find("mqtt311-clean").orElseThrow().subscriptions().isEmpty());
+    }
+
+    // Verifies that MQTT 5 cleanStart=false restores the existing session when one is present.
+    @Test
+    void shouldRestoreMqtt5SessionWhenCleanStartIsFalse() {
+        ClientConnection firstConnection = connectClient("mqtt5-restored", 5, false, false, 60L);
+        protocolEngine.handleSubscribe(firstConnection, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 0))));
+        protocolEngine.handleConnectionClosed(firstConnection);
+
+        ClientConnection secondConnection = connectionRegistry.open("127.0.0.1", "mqtt5-restored", "MQTT", 5, false);
+        ConnectDecision secondDecision = protocolEngine.handleConnect(secondConnection, mqtt5Connect(
+                "mqtt5-restored",
+                false,
+                60L));
+
+        assertTrue(secondDecision.accepted());
+        assertTrue(secondDecision.sessionPresent());
+        assertTrue(sessionRegistry.find("mqtt5-restored").orElseThrow().subscriptions().contains("sensors/+/temperature"));
+    }
+
+    // Verifies that MQTT 5 cleanStart=true discards any previous session state before reconnecting.
+    @Test
+    void shouldDiscardMqtt5SessionWhenCleanStartIsTrue() {
+        ClientConnection firstConnection = connectClient("mqtt5-fresh", 5, false, false, 60L);
+        protocolEngine.handleSubscribe(firstConnection, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 0))));
+        protocolEngine.handleConnectionClosed(firstConnection);
+
+        ClientConnection secondConnection = connectionRegistry.open("127.0.0.1", "mqtt5-fresh", "MQTT", 5, true);
+        ConnectDecision secondDecision = protocolEngine.handleConnect(secondConnection, mqtt5Connect(
+                "mqtt5-fresh",
+                true,
+                60L));
+
+        assertTrue(secondDecision.accepted());
+        assertFalse(secondDecision.sessionPresent());
+        assertTrue(sessionRegistry.find("mqtt5-fresh").orElseThrow().subscriptions().isEmpty());
+    }
+
+    // Verifies that MQTT 5 session expiry 0 destroys the session once the connection closes.
+    @Test
+    void shouldDeleteMqtt5SessionWhenExpiryIsZero() {
+        ClientConnection connection = connectClient("mqtt5-ephemeral", 5, false, false, 0L);
+        protocolEngine.handleSubscribe(connection, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 0))));
+
+        protocolEngine.handleConnectionClosed(connection);
+
+        assertTrue(sessionRegistry.find("mqtt5-ephemeral").isEmpty());
+    }
+
     // Verifies that valid subscriptions are accepted and normalized to the currently supported QoS 0 path.
     @Test
     void shouldGrantQos0ForValidSubscription() {
-        ClientConnection connection = connectClient("client-sub", 5);
+        ClientConnection connection = connectClient("client-sub", 5, true, false, 0L);
 
         SubscribeResult result = protocolEngine.handleSubscribe(connection, new SubscriptionRequest(List.of(
                 new SubscriptionItem("sensors/+/temperature", 1))));
@@ -162,7 +238,7 @@ class DefaultProtocolEngineTest {
     // Verifies that invalid topic filters are rejected without mutating session state.
     @Test
     void shouldRejectInvalidSubscriptionFilter() {
-        ClientConnection connection = connectClient("client-invalid-sub", 5);
+        ClientConnection connection = connectClient("client-invalid-sub", 5, true, false, 0L);
 
         SubscribeResult result = protocolEngine.handleSubscribe(connection, new SubscriptionRequest(List.of(
                 new SubscriptionItem("sensors/#/temperature", 0))));
@@ -176,7 +252,7 @@ class DefaultProtocolEngineTest {
     // Verifies that unsubscribe removes state from both the session registry and routing registry.
     @Test
     void shouldRemoveExistingSubscriptionOnUnsubscribe() {
-        ClientConnection connection = connectClient("client-unsub", 5);
+        ClientConnection connection = connectClient("client-unsub", 5, true, false, 0L);
         protocolEngine.handleSubscribe(connection, new SubscriptionRequest(List.of(
                 new SubscriptionItem("sensors/+/temperature", 0))));
 
@@ -193,7 +269,7 @@ class DefaultProtocolEngineTest {
     // Verifies that unsubscribing an unknown filter returns a non-error MQTT 5 reason code.
     @Test
     void shouldReportNoSubscriptionExistedOnUnsubscribe() {
-        ClientConnection connection = connectClient("client-unsub-missing", 5);
+        ClientConnection connection = connectClient("client-unsub-missing", 5, true, false, 0L);
 
         UnsubscribeResult result = protocolEngine.handleUnsubscribe(connection, new UnsubscribeRequest(List.of(
                 "sensors/+/temperature")));
@@ -206,7 +282,7 @@ class DefaultProtocolEngineTest {
     // Verifies that invalid filters are rejected during unsubscribe as well.
     @Test
     void shouldRejectInvalidUnsubscribeFilter() {
-        ClientConnection connection = connectClient("client-unsub-invalid", 5);
+        ClientConnection connection = connectClient("client-unsub-invalid", 5, true, false, 0L);
 
         UnsubscribeResult result = protocolEngine.handleUnsubscribe(connection, new UnsubscribeRequest(List.of(
                 "sensors/#/temperature")));
@@ -219,8 +295,8 @@ class DefaultProtocolEngineTest {
     // Verifies that a published message is routed to the matching subscriber set.
     @Test
     void shouldRoutePublishToMatchedSubscribers() {
-        ClientConnection publisher = connectClient("publisher", 5);
-        ClientConnection subscriber = connectClient("subscriber", 5);
+        ClientConnection publisher = connectClient("publisher", 5, true, false, 0L);
+        ClientConnection subscriber = connectClient("subscriber", 5, true, false, 0L);
         protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
                 new SubscriptionItem("sensors/+/temperature", 0))));
 
@@ -240,7 +316,7 @@ class DefaultProtocolEngineTest {
     // Verifies that topic names containing subscription wildcards are rejected for publish.
     @Test
     void shouldRejectPublishWithInvalidTopicName() {
-        ClientConnection publisher = connectClient("publisher-invalid-topic", 5);
+        ClientConnection publisher = connectClient("publisher-invalid-topic", 5, true, false, 0L);
 
         PublishResult result = protocolEngine.handlePublish(publisher, new PublishRequest(
                 "sensors/+/temperature",
@@ -257,7 +333,7 @@ class DefaultProtocolEngineTest {
     // Verifies that inbound QoS levels above the M1 support boundary are rejected.
     @Test
     void shouldRejectPublishWithUnsupportedQos() {
-        ClientConnection publisher = connectClient("publisher-qos1", 5);
+        ClientConnection publisher = connectClient("publisher-qos1", 5, true, false, 0L);
 
         PublishResult result = protocolEngine.handlePublish(publisher, new PublishRequest(
                 "sensors/room-1/temperature",
@@ -271,30 +347,28 @@ class DefaultProtocolEngineTest {
         assertEquals(MqttDisconnectReasonCode.QOS_NOT_SUPPORTED, result.disconnectReasonCode());
     }
 
-    // Verifies that an explicit disconnect unbinds the current session from its live connection.
+    // Verifies that an explicit disconnect changes connection state but defers session cleanup until the socket closes.
     @Test
-    void shouldUnbindSessionWhenClientDisconnects() {
-        ClientConnection connection = connectClient("disconnect-client", 5);
+    void shouldKeepSessionBoundUntilConnectionActuallyCloses() {
+        ClientConnection connection = connectClient("disconnect-client", 5, false, false, 60L);
 
         protocolEngine.handleDisconnect(connection);
 
         assertEquals(ConnectionState.DISCONNECTING, connection.state());
-        assertNull(sessionRegistry.find("disconnect-client").orElseThrow().connectionId());
+        assertEquals(connection.internalId(),
+                sessionRegistry.find("disconnect-client").orElseThrow().connectionId());
     }
 
     // Verifies that closing a superseded connection does not accidentally unbind the newer takeover session.
     @Test
     void shouldKeepNewSessionBindingWhenSupersededConnectionCloses() {
-        ClientConnection firstConnection = connectClient("takeover-client", 5);
-        ClientConnection secondConnection = connectionRegistry.open("127.0.0.1", "takeover-client", "MQTT", 5, true);
+        ClientConnection firstConnection = connectClient("takeover-client", 5, false, false, 60L);
+        ClientConnection secondConnection = connectionRegistry.open("127.0.0.1", "takeover-client", "MQTT", 5, false);
 
-        ConnectDecision secondDecision = protocolEngine.handleConnect(secondConnection, new ConnectRequest(
+        ConnectDecision secondDecision = protocolEngine.handleConnect(secondConnection, mqtt5Connect(
                 "takeover-client",
-                "MQTT",
-                5,
-                true,
-                null,
-                false));
+                false,
+                60L));
         assertTrue(secondDecision.accepted());
 
         protocolEngine.handleConnectionClosed(firstConnection);
@@ -304,17 +378,47 @@ class DefaultProtocolEngineTest {
                 sessionRegistry.find("takeover-client").orElseThrow().connectionId());
     }
 
-    private ClientConnection connectClient(String clientId, int protocolVersion) {
-        ClientConnection connection = connectionRegistry.open("127.0.0.1", clientId, "MQTT", protocolVersion, true);
-        ConnectDecision decision = protocolEngine.handleConnect(connection, new ConnectRequest(
+    private ClientConnection connectClient(
+            String clientId,
+            int protocolVersion,
+            boolean cleanSession,
+            boolean cleanStart,
+            Long sessionExpiryIntervalSeconds) {
+        ClientConnection connection = connectionRegistry.open(
+                "127.0.0.1",
                 clientId,
                 "MQTT",
                 protocolVersion,
-                true,
-                null,
-                false));
+                protocolVersion == 4 ? cleanSession : cleanStart);
+        ConnectDecision decision = protocolEngine.handleConnect(connection, protocolVersion == 4
+                ? mqtt311Connect(clientId, cleanSession)
+                : mqtt5Connect(clientId, cleanStart, sessionExpiryIntervalSeconds));
         assertTrue(decision.accepted());
         return connection;
+    }
+
+    private ConnectRequest mqtt311Connect(String clientId, boolean cleanSession) {
+        return new ConnectRequest(
+                clientId,
+                "MQTT",
+                4,
+                cleanSession,
+                false,
+                null,
+                null,
+                false);
+    }
+
+    private ConnectRequest mqtt5Connect(String clientId, boolean cleanStart, long sessionExpiryIntervalSeconds) {
+        return new ConnectRequest(
+                clientId,
+                "MQTT",
+                5,
+                false,
+                cleanStart,
+                sessionExpiryIntervalSeconds,
+                null,
+                false);
     }
 
     /**

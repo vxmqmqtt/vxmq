@@ -14,8 +14,10 @@
 4. [`01-status/current-status.md`](01-status/current-status.md)
 5. [`01-status/mqtt5-feature-matrix.md`](01-status/mqtt5-feature-matrix.md)
 6. [`02-architecture/architecture-overview.md`](02-architecture/architecture-overview.md)
-7. [`03-protocol/connect-flow.md`](03-protocol/connect-flow.md)
-8. [`07-project/collaboration.md`](07-project/collaboration.md)
+7. [`02-architecture/session-model.md`](02-architecture/session-model.md)
+8. [`03-protocol/connect-flow.md`](03-protocol/connect-flow.md)
+9. [`03-protocol/session-lifecycle.md`](03-protocol/session-lifecycle.md)
+10. [`07-project/collaboration.md`](07-project/collaboration.md)
 
 ## 目录说明
 
@@ -39,11 +41,11 @@
 
 ### `02-architecture`
 
-系统整体架构、模块边界和 Topic 路由设计。
+系统整体架构、模块边界、会话模型和 Topic 路由设计。
 
 ### `03-protocol`
 
-Broker 对 CONNECT、SUBSCRIBE / UNSUBSCRIBE、PUBLISH 的长期协议行为说明。
+Broker 对 CONNECT、会话生命周期、SUBSCRIBE / UNSUBSCRIBE、PUBLISH 的长期协议行为说明。
 
 ### `07-project`
 

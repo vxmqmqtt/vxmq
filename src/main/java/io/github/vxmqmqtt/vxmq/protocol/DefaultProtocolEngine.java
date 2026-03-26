@@ -17,6 +17,9 @@ import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeRequest;
 import io.github.vxmqmqtt.vxmq.routing.SubscriptionBinding;
 import io.github.vxmqmqtt.vxmq.routing.SubscriptionRegistry;
 import io.github.vxmqmqtt.vxmq.routing.TopicMatcher;
+import io.github.vxmqmqtt.vxmq.session.ClientSession;
+import io.github.vxmqmqtt.vxmq.session.SessionOpenRequest;
+import io.github.vxmqmqtt.vxmq.session.SessionOpenResult;
 import io.github.vxmqmqtt.vxmq.session.SessionRegistry;
 import io.github.vxmqmqtt.vxmq.transport.ClientConnection;
 import io.github.vxmqmqtt.vxmq.transport.ClientConnectionRegistry;
@@ -80,14 +83,21 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         }
 
         MqttProperties responseProperties = buildConnectResponseProperties(request, effectiveClientId);
+        SessionOpenResult sessionOpenResult = sessionRegistry.openSession(
+                effectiveClientId,
+                buildSessionOpenRequest(request, connection.internalId()));
+        clearRoutingBindings(sessionOpenResult.clearedSession());
         connection.assignClientId(effectiveClientId);
         connection.transitionTo(ConnectionState.CONNECTED);
         // A new connection with the same client identifier replaces the old one.
         String supersededConnectionId = connectionRegistry.bindClientId(effectiveClientId, connection.internalId())
                 .orElse(null);
-        sessionRegistry.bindConnection(effectiveClientId, connection.internalId());
         brokerEventSink.connectionAccepted(connection);
-        return ConnectDecision.accept(effectiveClientId, responseProperties, supersededConnectionId);
+        return ConnectDecision.accept(
+                sessionOpenResult.sessionPresent(),
+                effectiveClientId,
+                responseProperties,
+                supersededConnectionId);
     }
 
     @Override
@@ -178,17 +188,25 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     @Override
     public void handleDisconnect(ClientConnection connection) {
         connection.transitionTo(ConnectionState.DISCONNECTING);
-        if (connection.effectiveClientId() != null) {
-            sessionRegistry.unbindConnection(connection.effectiveClientId(), connection.internalId());
-        }
     }
 
     @Override
     public void handleConnectionClosed(ClientConnection connection) {
         if (connection.effectiveClientId() != null) {
-            sessionRegistry.unbindConnection(connection.effectiveClientId(), connection.internalId());
+            clearRoutingBindings(sessionRegistry.onConnectionClosed(connection.effectiveClientId(), connection.internalId())
+                    .orElse(null));
         }
         connection.transitionTo(ConnectionState.CLOSED);
+    }
+
+    private SessionOpenRequest buildSessionOpenRequest(ConnectRequest request, String connectionId) {
+        // MQTT 3.1.1 and MQTT 5 share the same open/restore flow, but differ in persistence semantics.
+        Long sessionExpiryIntervalSeconds = request.isMqtt5() ? request.mqtt5SessionExpiryIntervalSeconds() : null;
+        return new SessionOpenRequest(
+                request.startsFreshSession(),
+                request.retainsSessionOnDisconnect(),
+                sessionExpiryIntervalSeconds,
+                connectionId);
     }
 
     private String resolveClientId(ConnectRequest request) {
@@ -249,5 +267,15 @@ public class DefaultProtocolEngine implements ProtocolEngine {
 
     private boolean isSupportedRequestedQos(int requestedQos) {
         return requestedQos >= 0 && requestedQos <= 2;
+    }
+
+    private void clearRoutingBindings(ClientSession clearedSession) {
+        if (clearedSession == null) {
+            return;
+        }
+
+        for (String topicFilter : clearedSession.subscriptions()) {
+            subscriptionRegistry.removeSubscription(clearedSession.clientId(), topicFilter);
+        }
     }
 }

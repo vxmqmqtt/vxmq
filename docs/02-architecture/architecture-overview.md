@@ -70,7 +70,7 @@
 ### 连接建立
 
 1. `transport` 接收 CONNECT 并转换为内部 `ConnectRequest`
-2. `protocol` 校验协议、鉴权、解析 `clientId` 并给出接管决策
+2. `protocol` 校验协议、鉴权、解析 `clientId` 并决定“新建会话 / 恢复会话 / 替换旧会话”
 3. `session` 与 `connectionRegistry` 更新当前连接归属
 4. `transport` 按版本差异返回 CONNACK，并在必要时关闭旧连接
 
@@ -84,13 +84,15 @@
 ### 断连
 
 1. `transport` 接收主动断连、连接关闭或 Keep Alive 超时事件
-2. `protocol` 更新连接和会话状态
+2. `protocol` 更新连接和会话状态，并按持久策略决定保留或删除会话
 3. `transport` 清理在线 endpoint 索引
 
 ## 相关文档
 
 - [`module-design.md`](module-design.md)
+- [`session-model.md`](session-model.md)
 - [`topic-routing.md`](topic-routing.md)
 - [`../03-protocol/connect-flow.md`](../03-protocol/connect-flow.md)
+- [`../03-protocol/session-lifecycle.md`](../03-protocol/session-lifecycle.md)
 - [`../03-protocol/subscribe-flow.md`](../03-protocol/subscribe-flow.md)
 - [`../03-protocol/publish-flow.md`](../03-protocol/publish-flow.md)

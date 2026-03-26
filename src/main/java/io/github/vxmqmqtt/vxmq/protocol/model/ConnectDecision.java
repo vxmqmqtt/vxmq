@@ -18,13 +18,14 @@ public record ConnectDecision(
      * Builds a successful decision, optionally identifying a connection that must be taken over.
      */
     public static ConnectDecision accept(
+            boolean sessionPresent,
             String effectiveClientId,
             MqttProperties responseProperties,
             String supersededConnectionId) {
         return new ConnectDecision(
                 true,
                 MqttConnectReturnCode.CONNECTION_ACCEPTED,
-                false,
+                sessionPresent,
                 effectiveClientId,
                 responseProperties,
                 supersededConnectionId);

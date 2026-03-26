@@ -1,5 +1,6 @@
 package io.github.vxmqmqtt.vxmq.session;
 
+import java.time.Instant;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -10,6 +11,9 @@ public final class ClientSession {
 
     private final String clientId;
     private volatile String connectionId;
+    private volatile boolean persistent;
+    private volatile Long sessionExpiryIntervalSeconds;
+    private volatile Instant expiresAt;
     private final Set<String> subscriptions = ConcurrentHashMap.newKeySet();
 
     public ClientSession(String clientId) {
@@ -31,17 +35,42 @@ public final class ClientSession {
     }
 
     /**
-     * Binds the session to the active transport connection.
+     * Returns whether the session should survive a future connection close.
      */
-    public void bindConnection(String newConnectionId) {
-        this.connectionId = newConnectionId;
+    public boolean persistent() {
+        return persistent;
     }
 
     /**
-     * Marks the session as not currently attached to a live connection.
+     * Returns the MQTT 5 session expiry interval, or {@code null} for MQTT 3.1.1 persistent sessions.
      */
-    public void unbindConnection() {
+    public Long sessionExpiryIntervalSeconds() {
+        return sessionExpiryIntervalSeconds;
+    }
+
+    /**
+     * Returns the time when the offline session should expire, or {@code null} while online or indefinite.
+     */
+    public Instant expiresAt() {
+        return expiresAt;
+    }
+
+    /**
+     * Activates the session for a live transport connection and applies the current connect-time policy.
+     */
+    public void activate(String newConnectionId, boolean newPersistent, Long newSessionExpiryIntervalSeconds) {
+        this.connectionId = newConnectionId;
+        this.persistent = newPersistent;
+        this.sessionExpiryIntervalSeconds = newSessionExpiryIntervalSeconds;
+        this.expiresAt = null;
+    }
+
+    /**
+     * Marks the session as offline and optionally schedules future expiry.
+     */
+    public void markOffline(Instant newExpiresAt) {
         this.connectionId = null;
+        this.expiresAt = newExpiresAt;
     }
 
     /**

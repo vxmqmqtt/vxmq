@@ -16,8 +16,8 @@
 | 连接管理 | CONNECT / CONNACK 基础流程 | M1 | 支持 | 支持 | 已验证 | 已覆盖空 `clientId` 分支与基础返回码 |
 | 连接管理 | Keep Alive | M1 | 支持 | 支持 | 已验证 | 依赖 `vertx-mqtt` 内置超时处理 |
 | 连接管理 | Client Identifier 规则 | M1 | 支持 | 支持 | 已验证 | 已支持自动分配与重复连接接管 |
-| 连接管理 | Persistent Session / Clean Session | M2 | 不支持 | 不适用 | 未开始 | 指 MQTT 3.1.1 的持久会话语义 |
-| 连接管理 | Clean Start / Session Expiry | M2 | 不适用 | 不支持 | 未开始 | 指 MQTT 5 会话开启与过期语义 |
+| 连接管理 | Persistent Session / Clean Session | M2 | 支持 | 不适用 | 已验证 | 已覆盖新建、恢复、删除与订阅恢复 |
+| 连接管理 | Clean Start / Session Expiry | M2 | 不适用 | 基础支持 | 已验证 | 已覆盖会话创建、恢复、懒清理；未覆盖离线消息恢复 |
 | 连接管理 | Disconnect 语义 | M1 | 基础支持 | 基础支持 | 已验证 | 已覆盖主动断连、接管断连与异常断连 |
 | 连接管理 | Enhanced Authentication / AUTH | M5 | 不适用 | 不支持 | 未开始 | MQTT 5 高级认证流程 |
 | 发布订阅 | SUBSCRIBE / SUBACK | M1 | 支持 | 支持 | 已验证 | 已覆盖合法与非法 Topic Filter |
@@ -30,7 +30,7 @@
 | 发布订阅 | Shared Subscription | M5 | 不适用 | 不支持 | 未开始 | 高级分发能力 |
 | QoS | QoS 1 | M2 | 不支持 | 不支持 | 未开始 | 含入站、出站与 PUBACK 语义 |
 | QoS | QoS 2 | M3 | 不支持 | 不支持 | 未开始 | 含 PUBREC / PUBREL / PUBCOMP 状态机 |
-| 状态管理 | Session State | M2 | 不支持 | 不支持 | 未开始 | 会话视图从“连接绑定”扩展到完整会话语义 |
+| 状态管理 | Session State | M2 | 基础支持 | 基础支持 | 已验证 | 当前已支持在线/离线/过期三类状态，不含离线消息队列 |
 | 状态管理 | 离线消息与重连投递 | M2 | 不支持 | 不支持 | 未开始 | 指单机、内存态下的会话延续与消息恢复 |
 | 状态管理 | Retained Message | M2 | 不支持 | 不支持 | 未开始 | 含覆盖、清除与订阅后下发 |
 | 状态管理 | Will Message | M2 | 不支持 | 不支持 | 未开始 | 含异常断开触发条件 |

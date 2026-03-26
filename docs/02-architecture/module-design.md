@@ -52,8 +52,8 @@
 职责：
 
 - 管理按 `clientId` 归属的会话视图
-- 当前已落地内容包括：绑定连接 ID、订阅集合
-- 为后续扩展 Session Expiry、inflight message、offline message 预留位置
+- 当前已落地内容包括：在线/离线会话切换、持久策略、会话过期时间、订阅集合
+- 为后续扩展 inflight message、offline message 和更多 MQTT 5 状态预留位置
 
 ### `routing`
 
@@ -96,6 +96,8 @@
 
 - `clientId`
 - 当前绑定连接 ID
+- 是否持久
+- 会话过期配置与到期时间
 - 当前订阅集合
 
 ### 路由级状态
