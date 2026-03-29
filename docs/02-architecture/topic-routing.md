@@ -59,6 +59,7 @@ Topic Filter 与 Topic Name 各层级完全相同则匹配。
 
 - `session` 视图回答“某个 clientId 订阅了什么”
 - `routing` 视图回答“某个 Topic Name 命中了谁”
+- 订阅状态的真相在 `session`，`routing` 只是为匹配和投递服务的派生索引
 
 这种双视图设计允许订阅更新和消息查找分别按最自然的方向组织。
 
@@ -67,14 +68,14 @@ Topic Filter 与 Topic Name 各层级完全相同则匹配。
 ### 订阅注册
 
 1. 校验 Topic Filter
-2. 先更新 `session`
-3. 再更新 `routing`
+2. 先更新 `session`，因为订阅真相属于会话
+3. 再更新 `routing`，因为路由索引可由会话状态派生
 4. 若路由更新失败，回滚会话更新
 
 ### 取消订阅
 
 1. 校验 Topic Filter
-2. 同步清理 `session` 与 `routing`
+2. 先清理 `session`，再同步清理 `routing`
 3. 若两侧都不存在，按协议版本返回对应结果
 
 ### 发布查找
@@ -87,6 +88,7 @@ Topic Filter 与 Topic Name 各层级完全相同则匹配。
 ## 当前实现说明
 
 - 当前实现采用内存态订阅索引，优先保证语义正确与代码清晰。
+- 会话删除时必须同步清理路由索引，避免派生索引残留导致消息被错误投递。
 - 同一客户端的重叠订阅在当前实现中只投递一次，相关决策见 [`../07-project/decisions/0003-m1-overlapping-subscription-delivery.md`](../07-project/decisions/0003-m1-overlapping-subscription-delivery.md)。
 - Shared Subscription 仍未进入当前实现范围，因此路由结果当前不携带共享组语义。
 
