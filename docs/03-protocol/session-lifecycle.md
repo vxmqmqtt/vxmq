@@ -8,15 +8,29 @@
 - 明确主动断连、网络关闭和连接接管后的会话处理规则
 - 明确 `sessionPresent` 的返回条件
 
-## 生命周期状态
+## 生命周期关注点
 
-当前实现以三种状态理解会话：
+本文档不重复定义会话字段和内部存储结构，只关注这些事件发生时 Broker 如何处理会话：
 
-- 在线：会话绑定到当前活跃连接
-- 离线：会话仍存在，但没有绑定在线连接
-- 已删除：会话不存在，后续访问需视为新会话
+- CONNECT
+- DISCONNECT
+- 网络关闭
+- reconnect
+- session expiry
 
-对 MQTT 5 离线持久会话，还可能附带“将于何时过期”的时间点。
+## 生命周期状态图
+
+```mermaid
+stateDiagram-v2
+    [*] --> Online : CONNECT 创建或恢复会话
+    Online --> Offline : 持久会话网络关闭
+    Online --> Deleted : 非持久会话网络关闭
+    Offline --> Online : reconnect + sessionPresent=true
+    Offline --> Deleted : Session Expiry 到期
+    Online --> Deleted : cleanSession=true / cleanStart=true 替换旧会话
+```
+
+这里的 `Online / Offline / Deleted` 是协议语义上的生命周期状态；这些状态在内部如何落到字段，由 [`../02-architecture/session-model.md`](../02-architecture/session-model.md) 定义。
 
 ## CONNECT 打开或恢复会话
 

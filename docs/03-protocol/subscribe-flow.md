@@ -19,6 +19,24 @@
 
 - Topic Filter 列表
 
+## 交互时序
+
+```mermaid
+sequenceDiagram
+    participant Client as Client
+    participant Transport as transport
+    participant Protocol as protocol
+    participant Session as session
+    participant Routing as routing
+
+    Client->>Transport: SUBSCRIBE / UNSUBSCRIBE
+    Transport->>Protocol: handleSubscribe / handleUnsubscribe
+    Protocol->>Session: update subscription truth
+    Protocol->>Routing: update derived index
+    Protocol-->>Transport: SubscribeResult / UnsubscribeResult
+    Transport-->>Client: SUBACK / UNSUBACK
+```
+
 ## broker 处理流程
 
 ### SUBSCRIBE
@@ -62,6 +80,6 @@
 
 ## 当前实现边界
 
-- 当前仅实现 QoS 0 主链路；有效订阅统一授予 QoS 0
+- 当前支持 QoS 0 / QoS 1 订阅授予；请求 QoS 2 时当前降为 QoS 1
 - 当前不支持 Shared Subscription
 - 当前未实现 subscription options 的完整语义

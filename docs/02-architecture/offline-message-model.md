@@ -14,6 +14,17 @@
 - `routing` 只负责找出目标订阅者，不负责保存消息
 - `transport` 只负责实际发包和接收 `PUBACK`
 
+## 消息状态图
+
+```mermaid
+stateDiagram-v2
+    [*] --> Queued : 离线持久会话入队
+    Queued --> Inflight : 重连后恢复发送
+    Inflight --> Acknowledged : 收到 PUBACK
+    Inflight --> Queued : 连接关闭且消息未确认
+    Acknowledged --> [*]
+```
+
 ## 当前模型
 
 每个持久会话当前维护三类与 QoS 1 相关的状态：

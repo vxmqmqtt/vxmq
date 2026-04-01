@@ -20,6 +20,29 @@
 - 用户名密码
 - Keep Alive
 
+## 交互时序
+
+```mermaid
+sequenceDiagram
+    participant Client as Client
+    participant Transport as transport
+    participant Protocol as protocol
+    participant Session as session
+    participant Registry as connectionRegistry
+    participant Old as superseded endpoint
+
+    Client->>Transport: CONNECT
+    Transport->>Protocol: handleConnect(request)
+    Protocol->>Session: open / restore / replace session
+    Protocol->>Registry: bind clientId
+    Registry-->>Protocol: supersededConnectionId?
+    Protocol-->>Transport: ConnectDecision
+    Transport-->>Client: CONNACK
+    alt 存在旧连接
+        Transport->>Old: close / DISCONNECT(Session taken over)
+    end
+```
+
 ## broker 处理流程
 
 1. `transport` 从 `MqttEndpoint` 提取 CONNECT 字段并构造 `ConnectRequest`
@@ -73,6 +96,6 @@
 ## 当前实现边界
 
 - 当前已实现 MQTT 3.1.1 `Clean Session` 与 MQTT 5 `Clean Start / Session Expiry` 的会话打开、恢复和懒清理语义
-- 当前持久会话可恢复订阅，但不恢复离线消息
+- 当前持久会话可恢复订阅，并可恢复离线 QoS 1 消息
 - 当前未实现 MQTT 5 更多 CONNECT / CONNACK 属性
 - 当前会话绑定仍是内存态单机实现

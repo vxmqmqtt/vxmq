@@ -15,6 +15,35 @@
 - 主链路采用响应式、非阻塞、event-loop 模型。
 - 在 Quarkus 中接入 Vert.x 扩展时，优先使用 Mutiny 变体。
 
+## 架构关系图
+
+```mermaid
+flowchart TD
+    subgraph Host["宿主层"]
+        Bootstrap["bootstrap"]
+        Config["config"]
+    end
+
+    subgraph Core["Broker 核心"]
+        Transport["transport"]
+        Protocol["protocol"]
+        Session["session"]
+        Routing["routing"]
+        Auth["auth"]
+        Observability["observability"]
+        Connections["connectionRegistry"]
+    end
+
+    Bootstrap --> Transport
+    Config --> Transport
+    Transport --> Protocol
+    Protocol --> Session
+    Protocol --> Routing
+    Protocol --> Auth
+    Protocol --> Observability
+    Protocol --> Connections
+```
+
 ## 系统分层
 
 ### 宿主层

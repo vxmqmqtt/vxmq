@@ -8,6 +8,29 @@
 - 明确 QoS 1 在线投递与离线积压的分支
 - 明确 `PUBACK` 在当前实现中的完成语义
 
+## 主链路时序
+
+```mermaid
+sequenceDiagram
+    participant Publisher as Publisher
+    participant Broker as Broker
+    participant Session as session
+    participant Subscriber as Subscriber
+
+    Publisher->>Broker: PUBLISH(QoS1)
+    Broker->>Session: match subscriber + decide online/offline
+    alt 订阅者在线
+        Broker-->>Subscriber: PUBLISH(QoS1)
+        Broker-->>Publisher: PUBACK
+        Subscriber-->>Broker: PUBACK
+        Broker->>Session: remove inflight
+    else 持久会话离线
+        Broker->>Session: enqueue offline message
+        Broker-->>Publisher: PUBACK
+        Note over Session: reconnect 后恢复发送
+    end
+```
+
 ## 入站 PUBLISH
 
 - 当前 Broker 接受入站 QoS 0 和 QoS 1

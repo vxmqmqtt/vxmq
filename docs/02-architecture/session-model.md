@@ -1,6 +1,6 @@
 # 会话模型
 
-本文档定义 Broker 内部的会话真相模型。它描述“会话是什么、归谁所有、在何时创建、离线后如何保留、何时被删除”，不承担阶段汇报职责。
+本文档定义 Broker 内部的会话真相模型。它回答“会话是什么、包含哪些字段、这些字段归谁管理、不同状态在内部如何表示”，不承担阶段汇报职责。
 
 ## 目标
 
@@ -14,6 +14,21 @@
 - 会话是 `clientId` 归属的协议状态，由 `SessionRegistry` 管理。
 - 同一时刻一个 `clientId` 最多只有一个当前活跃连接，但可以存在一个离线会话。
 - 连接关闭不等于会话必然删除；是否保留会话由 MQTT 版本和连接时策略决定。
+
+## 会话状态视图
+
+```mermaid
+flowchart LR
+    Online["在线会话
+connectionId != null"]
+    Offline["离线会话
+connectionId == null"]
+    Expiring["过期中的离线会话
+expiresAt != null"]
+
+    Online --> Offline
+    Offline --> Expiring
+```
 
 ## 当前会话字段
 
@@ -60,38 +75,22 @@
 - 若离线会话的 `expiresAt` 已到，下一次访问该会话时删除
 - 当前阶段不引入后台扫描器
 
-## 持久与非持久会话
+## 持久标记的内部表达
 
-### 非持久会话
+- MQTT 3.1.1：`cleanSession=false` 的会话在内部视为持久会话
+- MQTT 5：`Session Expiry Interval>0` 的会话在内部视为持久会话
+- MQTT 3.1.1：`cleanSession=true` 的会话在内部视为非持久会话
+- MQTT 5：`Session Expiry Interval=0` 的会话在内部视为非持久会话
 
-- MQTT 3.1.1：`cleanSession=true`
-- MQTT 5：`Session Expiry Interval=0`
-
-行为：
-
-- 可在连接期间拥有订阅
-- 连接关闭后立即删除会话
-- 后续同 `clientId` 重连不会恢复旧订阅
-
-### 持久会话
-
-- MQTT 3.1.1：`cleanSession=false`
-- MQTT 5：`Session Expiry Interval>0`
-
-行为：
-
-- 连接关闭后进入离线状态
-- 订阅集合继续保留
-- 同 `clientId` 重连时可恢复会话
+这些标记如何影响 CONNECT、close、reconnect 和 expiry，由 [`../03-protocol/session-lifecycle.md`](../03-protocol/session-lifecycle.md) 统一定义。
 
 ## SessionRegistry 的职责
 
 `SessionRegistry` 是会话真相的唯一所有者，当前职责包括：
 
-- 按 CONNECT 请求打开新会话或恢复既有会话
-- 在连接关闭时根据会话策略决定“保留、离线、删除”
 - 维护会话级订阅集合
 - 维护离线队列与 QoS 1 inflight 状态
+- 按协议层决策创建、更新、删除和查询会话
 - 在读取或修改会话前执行懒清理
 
 `SessionRegistry` 不负责：
@@ -112,10 +111,9 @@
 
 当前会话模型已经覆盖：
 
-- MQTT 3.1.1 `Clean Session`
-- MQTT 5 `Clean Start / Session Expiry`
-- 离线会话的订阅恢复
-- 离线 QoS 1 消息积压与重连恢复
+- MQTT 3.1.1 / MQTT 5 共用的内部会话字段表达
+- 在线 / 离线 / 过期中的内部状态表示
+- 离线会话的订阅、离线消息与 QoS 1 inflight 承载
 - QoS 1 inflight 跟踪
 - 会话懒清理
 
