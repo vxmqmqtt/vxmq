@@ -25,6 +25,8 @@
 - `sessionExpiryIntervalSeconds`
 - `expiresAt`
 - `subscriptions`
+- `queuedMessages`
+- `inflightMessages`
 
 字段语义：
 
@@ -33,7 +35,9 @@
 - `persistent`：连接关闭后该会话是否允许继续保留。
 - `sessionExpiryIntervalSeconds`：MQTT 5 会话过期秒数；对 MQTT 3.1.1 的持久会话使用 `null` 表示“无该字段”。
 - `expiresAt`：离线会话的预期过期时间；在线会话或无限期保留的 MQTT 3.1.1 持久会话为 `null`。
-- `subscriptions`：该会话拥有的订阅集合。当前阶段只恢复订阅，不恢复离线消息。
+- `subscriptions`：该会话拥有的订阅集合。
+- `queuedMessages`：该会话离线期间积压的待恢复 QoS 1 消息。
+- `inflightMessages`：已发送、等待订阅端 `PUBACK` 的 QoS 1 消息。
 
 ## 在线、离线与过期
 
@@ -48,6 +52,7 @@
 - `connectionId == null`
 - 持久会话在连接关闭后可进入离线状态
 - 订阅集合继续保留，供后续重连恢复
+- 离线队列继续保留，供重连恢复投递
 
 ### 过期会话
 
@@ -86,13 +91,13 @@
 - 按 CONNECT 请求打开新会话或恢复既有会话
 - 在连接关闭时根据会话策略决定“保留、离线、删除”
 - 维护会话级订阅集合
+- 维护离线队列与 QoS 1 inflight 状态
 - 在读取或修改会话前执行懒清理
 
 `SessionRegistry` 不负责：
 
 - 管理在线 endpoint
 - 执行 Topic 匹配
-- 保存离线消息队列
 - 处理跨重启恢复
 
 ## 与路由索引的关系
@@ -110,11 +115,12 @@
 - MQTT 3.1.1 `Clean Session`
 - MQTT 5 `Clean Start / Session Expiry`
 - 离线会话的订阅恢复
+- 离线 QoS 1 消息积压与重连恢复
+- QoS 1 inflight 跟踪
 - 会话懒清理
 
 当前仍未覆盖：
 
-- 离线消息实际入队与重投递
 - Will Message 发布
 - Retained Message
 - 持久化与跨重启恢复

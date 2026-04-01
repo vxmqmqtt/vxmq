@@ -56,7 +56,7 @@ public class InMemorySubscriptionRegistry implements SubscriptionRegistry {
             for (SubscriptionBinding binding : entry.getValue()) {
                 // When overlapping filters match the same client, keep a single delivery target.
                 deduplicated.merge(binding.clientId(), binding, (left, right) ->
-                        left.requestedQos() >= right.requestedQos() ? left : right);
+                        left.grantedQos().value() >= right.grantedQos().value() ? left : right);
             }
         }
         return new ArrayList<>(deduplicated.values());

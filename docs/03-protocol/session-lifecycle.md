@@ -67,6 +67,7 @@
 - MQTT 3.1.1 持久会话：转为离线并无限期保留
 - MQTT 5 且 `Session Expiry Interval=0`：立即删除
 - MQTT 5 且 `Session Expiry Interval>0`：转为离线并记录 `expiresAt`
+- 若持久会话存在未确认的 QoS 1 inflight 消息，这些消息会回退为离线队列
 
 ## 重复 clientId 接管
 
@@ -83,7 +84,6 @@
 
 ## 当前阶段不包含的行为
 
-- 离线消息实际入队与重发
 - Will Message 发布
 - Retained Message 下发
 - 持久化与跨重启恢复

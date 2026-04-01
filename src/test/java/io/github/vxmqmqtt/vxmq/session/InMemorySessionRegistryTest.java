@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.github.vxmqmqtt.vxmq.config.BrokerRuntimeConfig;
+import io.netty.handler.codec.mqtt.MqttQoS;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -53,7 +55,7 @@ class InMemorySessionRegistryTest {
         SessionOpenResult firstOpen = sessionRegistry.openSession(
                 "restored-client",
                 new SessionOpenRequest(false, true, null, "connection-1"));
-        firstOpen.session().subscriptions().add("sensors/+/temperature");
+        sessionRegistry.addSubscription("restored-client", "sensors/+/temperature", MqttQoS.AT_MOST_ONCE);
         sessionRegistry.onConnectionClosed("restored-client", "connection-1");
 
         SessionOpenResult secondOpen = sessionRegistry.openSession(
@@ -105,5 +107,111 @@ class InMemorySessionRegistryTest {
         session.markOffline(Instant.now().minusSeconds(1));
 
         assertTrue(sessionRegistry.find("expired-client").isEmpty());
+    }
+
+    // Verifies that the registry drops the oldest offline message when the queue capacity is exceeded.
+    @Test
+    void shouldDropOldestOfflineMessageWhenQueueIsFull() {
+        sessionRegistry.configure(new TestBrokerRuntimeConfig(2));
+        sessionRegistry.openSession(
+                "offline-client",
+                new SessionOpenRequest(false, true, null, "connection-1"));
+
+        sessionRegistry.enqueueOfflineMessage("offline-client", new QueuedMessage(
+                "sensors/room-1/temperature",
+                "first".getBytes(),
+                MqttQoS.AT_LEAST_ONCE,
+                false,
+                false));
+        sessionRegistry.enqueueOfflineMessage("offline-client", new QueuedMessage(
+                "sensors/room-1/temperature",
+                "second".getBytes(),
+                MqttQoS.AT_LEAST_ONCE,
+                false,
+                false));
+        sessionRegistry.enqueueOfflineMessage("offline-client", new QueuedMessage(
+                "sensors/room-1/temperature",
+                "third".getBytes(),
+                MqttQoS.AT_LEAST_ONCE,
+                false,
+                false));
+
+        ClientSession session = sessionRegistry.find("offline-client").orElseThrow();
+        assertEquals(2, session.queuedMessageCount());
+        assertEquals("second", new String(session.queuedMessages().get(0).payloadCopy()));
+        assertEquals("third", new String(session.queuedMessages().get(1).payloadCopy()));
+    }
+
+    // Verifies that the registry can track an inflight QoS 1 delivery and clear it after PUBACK.
+    @Test
+    void shouldCreateAndAcknowledgeInflightDelivery() {
+        sessionRegistry.openSession(
+                "inflight-client",
+                new SessionOpenRequest(false, true, null, "connection-1"));
+
+        InflightMessage inflightMessage = sessionRegistry.createInflightMessage(
+                        "inflight-client",
+                        "sensors/room-1/temperature",
+                        "payload".getBytes(),
+                        MqttQoS.AT_LEAST_ONCE,
+                        false,
+                        false,
+                        false)
+                .orElseThrow();
+
+        assertEquals(1, sessionRegistry.find("inflight-client").orElseThrow().inflightMessageCount());
+        assertTrue(sessionRegistry.acknowledge("inflight-client", inflightMessage.packetId()));
+        assertEquals(0, sessionRegistry.find("inflight-client").orElseThrow().inflightMessageCount());
+    }
+
+    // Verifies that persistent sessions move unacknowledged inflight deliveries back to the offline queue on close.
+    @Test
+    void shouldRequeueInflightMessagesWhenPersistentConnectionCloses() {
+        sessionRegistry.openSession(
+                "persistent-inflight",
+                new SessionOpenRequest(false, true, null, "connection-1"));
+        sessionRegistry.createInflightMessage(
+                "persistent-inflight",
+                "sensors/room-1/temperature",
+                "payload".getBytes(),
+                MqttQoS.AT_LEAST_ONCE,
+                false,
+                false,
+                false);
+
+        sessionRegistry.onConnectionClosed("persistent-inflight", "connection-1");
+
+        ClientSession session = sessionRegistry.find("persistent-inflight").orElseThrow();
+        assertEquals(0, session.inflightMessageCount());
+        assertEquals(1, session.queuedMessageCount());
+        assertTrue(session.queuedMessages().getFirst().duplicate());
+    }
+
+    private record TestBrokerRuntimeConfig(int offlineQueueCapacityPerSession) implements BrokerRuntimeConfig {
+
+        @Override
+        public boolean enabled() {
+            return true;
+        }
+
+        @Override
+        public String host() {
+            return "127.0.0.1";
+        }
+
+        @Override
+        public int port() {
+            return 1883;
+        }
+
+        @Override
+        public int maxMessageSize() {
+            return 268435455;
+        }
+
+        @Override
+        public int timeoutOnConnectSeconds() {
+            return 10;
+        }
     }
 }

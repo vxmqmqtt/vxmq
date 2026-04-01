@@ -1,7 +1,12 @@
 package io.github.vxmqmqtt.vxmq.session;
 
+import io.github.vxmqmqtt.vxmq.config.BrokerRuntimeConfig;
+import io.netty.handler.codec.mqtt.MqttQoS;
+import io.netty.handler.codec.mqtt.MqttQoS;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -13,7 +18,25 @@ import java.util.concurrent.ConcurrentHashMap;
 @ApplicationScoped
 public class InMemorySessionRegistry implements SessionRegistry {
 
+    static final int DEFAULT_OFFLINE_QUEUE_CAPACITY = 1_024;
+
     private final Map<String, ClientSession> sessions = new ConcurrentHashMap<>();
+    private volatile int offlineQueueCapacity = DEFAULT_OFFLINE_QUEUE_CAPACITY;
+
+    public InMemorySessionRegistry() {
+    }
+
+    public InMemorySessionRegistry(int offlineQueueCapacity) {
+        this.offlineQueueCapacity = offlineQueueCapacity;
+    }
+
+    /**
+     * Applies runtime configuration when the registry is managed by CDI, while keeping plain tests lightweight.
+     */
+    @Inject
+    void configure(BrokerRuntimeConfig brokerRuntimeConfig) {
+        this.offlineQueueCapacity = brokerRuntimeConfig.offlineQueueCapacityPerSession();
+    }
 
     @Override
     public SessionOpenResult openSession(String clientId, SessionOpenRequest request) {
@@ -56,6 +79,7 @@ public class InMemorySessionRegistry implements SessionRegistry {
 
         Long sessionExpiryIntervalSeconds = session.sessionExpiryIntervalSeconds();
         if (sessionExpiryIntervalSeconds == null) {
+            session.requeueInflightMessages(offlineQueueCapacity);
             session.markOffline(null);
             return Optional.empty();
         }
@@ -65,6 +89,7 @@ public class InMemorySessionRegistry implements SessionRegistry {
             return Optional.of(session);
         }
 
+        session.requeueInflightMessages(offlineQueueCapacity);
         session.markOffline(Instant.now().plusSeconds(sessionExpiryIntervalSeconds));
         return Optional.empty();
     }
@@ -75,17 +100,49 @@ public class InMemorySessionRegistry implements SessionRegistry {
     }
 
     @Override
-    public void addSubscription(String clientId, String topicFilter) {
-        sessionForMutation(clientId).subscriptions().add(topicFilter);
+    public void addSubscription(String clientId, String topicFilter, MqttQoS grantedQos) {
+        sessionForMutation(clientId).putSubscription(topicFilter, grantedQos);
     }
 
     @Override
     public boolean removeSubscription(String clientId, String topicFilter) {
         ClientSession session = sessionForMutation(clientId);
         if (session != null) {
-            return session.subscriptions().remove(topicFilter);
+            return session.removeSubscription(topicFilter);
         }
         return false;
+    }
+
+    @Override
+    public void enqueueOfflineMessage(String clientId, QueuedMessage queuedMessage) {
+        sessionForMutation(clientId).enqueueOfflineMessage(queuedMessage, offlineQueueCapacity);
+    }
+
+    @Override
+    public List<InflightMessage> drainQueuedMessages(String clientId) {
+        return find(clientId)
+                .map(ClientSession::drainQueuedMessagesToInflight)
+                .orElseGet(List::of);
+    }
+
+    @Override
+    public Optional<InflightMessage> createInflightMessage(
+            String clientId,
+            String topicName,
+            byte[] payload,
+            MqttQoS qos,
+            boolean retain,
+            boolean duplicate,
+            boolean fromOfflineQueue) {
+        return find(clientId)
+                .map(session -> session.createInflightMessage(topicName, payload, qos, retain, duplicate, fromOfflineQueue));
+    }
+
+    @Override
+    public boolean acknowledge(String clientId, int packetId) {
+        return find(clientId)
+                .map(session -> session.acknowledge(packetId))
+                .orElse(false);
     }
 
     @Override

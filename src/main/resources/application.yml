@@ -5,6 +5,7 @@ vxmq:
     port: 1883
     max-message-size: 268435455
     timeout-on-connect-seconds: 10
+    offline-queue-capacity-per-session: 1024
 
 quarkus:
   kafka:

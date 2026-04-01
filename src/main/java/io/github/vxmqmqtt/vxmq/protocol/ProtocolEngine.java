@@ -2,6 +2,7 @@ package io.github.vxmqmqtt.vxmq.protocol;
 
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectDecision;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.PublishDelivery;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscribeResult;
@@ -9,6 +10,7 @@ import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeRequest;
 import io.github.vxmqmqtt.vxmq.transport.ClientConnection;
+import java.util.List;
 
 /**
  * Encapsulates broker-side MQTT protocol decisions independently from transport code.
@@ -34,6 +36,16 @@ public interface ProtocolEngine {
      * Processes an inbound PUBLISH and returns either deliveries or a disconnect decision.
      */
     PublishResult handlePublish(ClientConnection connection, PublishRequest request);
+
+    /**
+     * Returns queued deliveries that should be resumed after a session reconnect succeeds.
+     */
+    List<PublishDelivery> handleSessionResume(ClientConnection connection);
+
+    /**
+     * Completes one QoS 1 outbound delivery after the subscriber acknowledges it.
+     */
+    void handlePubAck(ClientConnection connection, int packetId);
 
     /**
      * Handles an explicit MQTT DISCONNECT received from the client.

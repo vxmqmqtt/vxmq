@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-项目当前处于：`M1 已完成，M2 第一阶段已完成，M2 继续进行中`
+项目当前处于：`M1 已完成，M2 第二阶段已完成，M2 继续进行中`
 
 ## 当前已完成能力
 
@@ -14,6 +14,8 @@
 - MQTT 3.1.1 `Clean Session`
 - MQTT 5 `Clean Start / Session Expiry`
 - 持久会话订阅恢复与会话懒清理
+- QoS 1 入站与出站主链路
+- 持久会话离线 QoS 1 消息积压与重连恢复
 - SUBSCRIBE / SUBACK
 - UNSUBSCRIBE / UNSUBACK
 - PUBLISH QoS 0 主链路
@@ -25,8 +27,8 @@
 ## 当前代码实现边界
 
 - 当前实现是单机、内存态 Broker。
-- 当前主链路聚焦 QoS 0，不支持 QoS 1 / QoS 2 的完整状态机。
-- 当前已实现会话过期的懒清理与持久会话订阅恢复，但尚未实现离线消息恢复、Retained Message、Will Message、用户名密码鉴权和 TLS。
+- 当前主链路已覆盖 QoS 0 / QoS 1，但仍不支持 QoS 2。
+- 当前已实现会话过期的懒清理、持久会话订阅恢复以及离线 QoS 1 消息恢复，但尚未实现 Retained Message、Will Message、用户名密码鉴权和 TLS。
 - 当前路由和会话状态均为内存实现，不具备持久化和重启恢复能力。
 
 ## 当前文档真相入口
@@ -40,12 +42,11 @@
 
 ## 当前主要缺口
 
-- 离线消息尚未进入实际入队、恢复与重投递。
-- QoS 1 / QoS 2 状态机尚未进入设计与实现。
-- Retained Message、Will Message，以及带消息恢复能力的完整可靠性语义尚未落地。
+- QoS 2 状态机尚未进入设计与实现。
+- Retained Message、Will Message，以及更完整的可靠性语义尚未落地。
 - 订阅树 / 路由索引重构尚未开始。
 - 基础鉴权、观测、运维和恢复能力尚未进入实现阶段。
 
 ## 下一阶段入口
 
-`M2` 的下一步重点是“会话恢复之后的可靠性能力”：离线消息、QoS 1、Retained Message、Will Message，以及为后续高级订阅能力做准备的订阅树 / 路由索引重构。
+`M2` 的下一步重点从“会话恢复”转向“可靠性补全”：Retained Message、Will Message，以及为后续高级订阅能力做准备的订阅树 / 路由索引重构。

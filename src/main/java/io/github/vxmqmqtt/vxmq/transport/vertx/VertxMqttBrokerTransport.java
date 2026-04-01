@@ -114,17 +114,20 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
         endpoint.setClientIdentifier(decision.effectiveClientId());
         endpoint.accept(decision.sessionPresent(), decision.responseProperties());
         endpointsByConnectionId.put(connection.internalId(), endpoint);
+        installHandlers(connection, endpoint);
         // The transport closes the old socket after the new client id binding is accepted.
         if (decision.supersededConnectionId() != null) {
             closeSupersededConnection(decision.supersededConnectionId());
         }
-        installHandlers(connection, endpoint);
+        protocolEngine.handleSessionResume(connection).forEach(this::sendPublishToSubscriber);
     }
 
     private void installHandlers(ClientConnection connection, MqttEndpoint endpoint) {
+        endpoint.publishAutoAck(false);
         endpoint.publishHandler(message -> {
             PublishResult publishResult = protocolEngine.handlePublish(connection, new PublishRequest(
                     message.topicName(),
+                    message.messageId(),
                     message.qosLevel().value(),
                     message.isRetain(),
                     message.isDup(),
@@ -135,9 +138,12 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                 return;
             }
 
+            if (publishResult.publishAcknowledge()) {
+                acknowledgeInboundPublish(endpoint, message.messageId(), connection.protocolVersion(), publishResult);
+            }
+
             // Delivery fan-out stays in the transport because it needs access to live endpoints.
-            publishResult.deliveries()
-                    .forEach(delivery -> sendPublishToSubscriber(delivery, message.topicName(), message.payload(), message.isRetain()));
+            publishResult.deliveries().forEach(this::sendPublishToSubscriber);
         });
 
         endpoint.subscribeHandler(subscribe -> {
@@ -173,6 +179,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
         });
 
         endpoint.disconnectHandler(() -> protocolEngine.handleDisconnect(connection));
+        endpoint.publishAcknowledgeHandler(packetId -> protocolEngine.handlePubAck(connection, packetId));
         endpoint.closeHandler(() -> {
             protocolEngine.handleConnectionClosed(connection);
             endpointsByConnectionId.remove(connection.internalId());
@@ -187,16 +194,12 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
         }
     }
 
-    private void sendPublishToSubscriber(
-            PublishDelivery delivery,
-            String topicName,
-            Buffer payload,
-            boolean retain) {
+    private void sendPublishToSubscriber(PublishDelivery delivery) {
         // Re-resolve the active connection to avoid publishing to a client that has been taken over.
         connectionRegistry.findActiveConnectionId(delivery.clientId())
                 .map(endpointsByConnectionId::get)
                 .ifPresent(endpoint ->
-                        endpoint.publish(topicName, payload == null ? Buffer.buffer() : payload, delivery.grantedQos(), false, retain)
+                        outboundPublish(endpoint, delivery)
                                 .subscribe()
                                 .with(
                                         ignored -> {
@@ -216,6 +219,37 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
             return;
         }
         endpoint.close();
+    }
+
+    private void acknowledgeInboundPublish(
+            MqttEndpoint endpoint,
+            int packetId,
+            int protocolVersion,
+            PublishResult publishResult) {
+        if (protocolVersion == 5) {
+            endpoint.publishAcknowledge(packetId, publishResult.pubAckReasonCode(), MqttProperties.NO_PROPERTIES);
+            return;
+        }
+        endpoint.publishAcknowledge(packetId);
+    }
+
+    private Uni<Integer> outboundPublish(MqttEndpoint endpoint, PublishDelivery delivery) {
+        Buffer payload = delivery.payload() == null ? Buffer.buffer() : Buffer.buffer(delivery.payloadCopy());
+        if (delivery.grantedQos() == io.netty.handler.codec.mqtt.MqttQoS.AT_LEAST_ONCE && delivery.packetId() != null) {
+            return endpoint.publish(
+                    delivery.topicName(),
+                    payload,
+                    delivery.grantedQos(),
+                    delivery.duplicate(),
+                    delivery.retain(),
+                    delivery.packetId());
+        }
+        return endpoint.publish(
+                delivery.topicName(),
+                payload,
+                delivery.grantedQos(),
+                delivery.duplicate(),
+                delivery.retain());
     }
 
     /**

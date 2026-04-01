@@ -18,6 +18,8 @@ import io.github.vxmqmqtt.vxmq.routing.SubscriptionBinding;
 import io.github.vxmqmqtt.vxmq.routing.SubscriptionRegistry;
 import io.github.vxmqmqtt.vxmq.routing.TopicMatcher;
 import io.github.vxmqmqtt.vxmq.session.ClientSession;
+import io.github.vxmqmqtt.vxmq.session.InflightMessage;
+import io.github.vxmqmqtt.vxmq.session.QueuedMessage;
 import io.github.vxmqmqtt.vxmq.session.SessionOpenRequest;
 import io.github.vxmqmqtt.vxmq.session.SessionOpenResult;
 import io.github.vxmqmqtt.vxmq.session.SessionRegistry;
@@ -28,12 +30,13 @@ import io.netty.handler.codec.mqtt.MqttConnectReturnCode;
 import io.netty.handler.codec.mqtt.MqttProperties;
 import io.netty.handler.codec.mqtt.MqttQoS;
 import io.vertx.mqtt.messages.codes.MqttDisconnectReasonCode;
+import io.vertx.mqtt.messages.codes.MqttPubAckReasonCode;
+import io.vertx.mqtt.messages.codes.MqttSubAckReasonCode;
 import io.vertx.mqtt.messages.codes.MqttUnsubAckReasonCode;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import io.vertx.mqtt.messages.codes.MqttSubAckReasonCode;
 
 /**
  * Default in-memory protocol engine for the current single-node milestone.
@@ -117,14 +120,15 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 continue;
             }
 
+            MqttQoS grantedQos = grantedSubscriptionQos(item.requestedQos());
             try {
-                sessionRegistry.addSubscription(connection.effectiveClientId(), topicFilter);
+                sessionRegistry.addSubscription(connection.effectiveClientId(), topicFilter, grantedQos);
                 subscriptionRegistry.addSubscription(new SubscriptionBinding(
                         connection.effectiveClientId(),
                         topicFilter,
-                        item.requestedQos()));
+                        grantedQos));
                 brokerEventSink.subscriptionAdded(connection, topicFilter);
-                results.add(SubscriptionItemResult.granted(topicFilter, MqttQoS.AT_MOST_ONCE));
+                results.add(SubscriptionItemResult.granted(topicFilter, grantedQos));
             } catch (RuntimeException exception) {
                 // Roll back the session view if the routing registry write fails.
                 sessionRegistry.removeSubscription(connection.effectiveClientId(), topicFilter);
@@ -170,19 +174,88 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             return PublishResult.rejected(MqttDisconnectReasonCode.TOPIC_NAME_INVALID);
         }
 
-        if (request.qos() != 0) {
+        if (request.qos() < 0 || request.qos() > 1) {
             brokerEventSink.protocolWarning(connection, "Rejected unsupported inbound QoS: " + request.qos());
             return PublishResult.rejected(MqttDisconnectReasonCode.QOS_NOT_SUPPORTED);
         }
 
-        List<PublishDelivery> deliveries = subscriptionRegistry.match(request.topicName())
-                .stream()
-                .map(binding -> new PublishDelivery(binding.clientId(), MqttQoS.AT_MOST_ONCE))
-                .toList();
+        List<PublishDelivery> deliveries = new ArrayList<>();
+        int queuedMessageCount = 0;
+        for (SubscriptionBinding binding : subscriptionRegistry.match(request.topicName())) {
+            MqttQoS deliveryQos = grantedDeliveryQos(request.qos(), binding.grantedQos());
+            boolean online = connectionRegistry.findActiveConnectionId(binding.clientId()).isPresent();
+            if (deliveryQos == MqttQoS.AT_MOST_ONCE) {
+                if (online) {
+                    deliveries.add(new PublishDelivery(
+                            binding.clientId(),
+                            request.topicName(),
+                            copyPayload(request.payload()),
+                            MqttQoS.AT_MOST_ONCE,
+                            request.retain(),
+                            false,
+                            null,
+                            false));
+                }
+                continue;
+            }
 
-        int matchedClients = deliveries.size();
+            if (online) {
+                sessionRegistry.createInflightMessage(
+                                binding.clientId(),
+                                request.topicName(),
+                                request.payload(),
+                                MqttQoS.AT_LEAST_ONCE,
+                                request.retain(),
+                                false,
+                                false)
+                        .map(inflightMessage -> toPublishDelivery(binding.clientId(), inflightMessage))
+                        .ifPresent(deliveries::add);
+                continue;
+            }
+
+            ClientSession session = sessionRegistry.find(binding.clientId()).orElse(null);
+            if (session != null && session.persistent()) {
+                sessionRegistry.enqueueOfflineMessage(binding.clientId(), new QueuedMessage(
+                        request.topicName(),
+                        copyPayload(request.payload()),
+                        MqttQoS.AT_LEAST_ONCE,
+                        request.retain(),
+                        false));
+                queuedMessageCount++;
+            }
+        }
+
+        int matchedClients = deliveries.size() + queuedMessageCount;
         brokerEventSink.messageRouted(connection, request.topicName(), matchedClients);
-        return PublishResult.accepted(deliveries);
+        return PublishResult.accepted(
+                deliveries,
+                queuedMessageCount,
+                request.qos() == 1,
+                request.qos() == 1 ? MqttPubAckReasonCode.SUCCESS : null);
+    }
+
+    @Override
+    public List<PublishDelivery> handleSessionResume(ClientConnection connection) {
+        if (connection.effectiveClientId() == null) {
+            return List.of();
+        }
+
+        ClientSession session = sessionRegistry.find(connection.effectiveClientId()).orElse(null);
+        if (session == null || !connection.internalId().equals(session.connectionId())) {
+            return List.of();
+        }
+
+        return sessionRegistry.drainQueuedMessages(connection.effectiveClientId())
+                .stream()
+                .map(inflightMessage -> toPublishDelivery(connection.effectiveClientId(), inflightMessage))
+                .toList();
+    }
+
+    @Override
+    public void handlePubAck(ClientConnection connection, int packetId) {
+        if (connection.effectiveClientId() != null) {
+            sessionRegistry.acknowledge(connection.effectiveClientId(), packetId);
+        }
     }
 
     @Override
@@ -267,6 +340,34 @@ public class DefaultProtocolEngine implements ProtocolEngine {
 
     private boolean isSupportedRequestedQos(int requestedQos) {
         return requestedQos >= 0 && requestedQos <= 2;
+    }
+
+    private MqttQoS grantedSubscriptionQos(int requestedQos) {
+        if (requestedQos <= 0) {
+            return MqttQoS.AT_MOST_ONCE;
+        }
+        return MqttQoS.AT_LEAST_ONCE;
+    }
+
+    private MqttQoS grantedDeliveryQos(int publishQos, MqttQoS subscriptionQos) {
+        int value = Math.min(publishQos, subscriptionQos.value());
+        return value == 0 ? MqttQoS.AT_MOST_ONCE : MqttQoS.AT_LEAST_ONCE;
+    }
+
+    private PublishDelivery toPublishDelivery(String clientId, InflightMessage inflightMessage) {
+        return new PublishDelivery(
+                clientId,
+                inflightMessage.topicName(),
+                copyPayload(inflightMessage.payload()),
+                inflightMessage.qos(),
+                inflightMessage.retain(),
+                inflightMessage.duplicate(),
+                inflightMessage.packetId(),
+                inflightMessage.fromOfflineQueue());
+    }
+
+    private byte[] copyPayload(byte[] payload) {
+        return payload == null ? null : payload.clone();
     }
 
     private void clearRoutingBindings(ClientSession clearedSession) {
