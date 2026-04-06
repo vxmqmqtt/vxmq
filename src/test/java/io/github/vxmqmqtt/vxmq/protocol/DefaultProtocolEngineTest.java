@@ -431,6 +431,7 @@ class DefaultProtocolEngineTest {
                 "payload".getBytes()));
 
         assertFalse(result.accepted());
+        assertTrue(result.closeConnection());
         assertTrue(result.deliveries().isEmpty());
         assertEquals(MqttDisconnectReasonCode.TOPIC_NAME_INVALID, result.disconnectReasonCode());
     }
@@ -449,6 +450,7 @@ class DefaultProtocolEngineTest {
                 "payload".getBytes()));
 
         assertFalse(result.accepted());
+        assertTrue(result.closeConnection());
         assertTrue(result.deliveries().isEmpty());
         assertEquals(MqttDisconnectReasonCode.QOS_NOT_SUPPORTED, result.disconnectReasonCode());
     }

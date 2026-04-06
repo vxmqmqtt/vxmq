@@ -125,8 +125,12 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                     message.isDup(),
                     message.payload() == null ? null : message.payload().getBytes()));
 
-            if (!publishResult.accepted()) {
+            if (publishResult.closeConnection()) {
                 disconnectForInvalidPublish(connection, endpoint, publishResult.disconnectReasonCode());
+                return;
+            }
+
+            if (!publishResult.accepted()) {
                 return;
             }
 

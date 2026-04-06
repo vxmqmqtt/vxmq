@@ -171,12 +171,12 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     public PublishResult handlePublish(ClientConnection connection, PublishRequest request) {
         if (!topicMatcher.isValidTopicName(request.topicName())) {
             brokerEventSink.protocolWarning(connection, "Rejected publish with invalid topic name: " + request.topicName());
-            return PublishResult.rejected(MqttDisconnectReasonCode.TOPIC_NAME_INVALID);
+            return PublishResult.rejectedWithDisconnect(MqttDisconnectReasonCode.TOPIC_NAME_INVALID);
         }
 
         if (request.qos() < 0 || request.qos() > 1) {
             brokerEventSink.protocolWarning(connection, "Rejected unsupported inbound QoS: " + request.qos());
-            return PublishResult.rejected(MqttDisconnectReasonCode.QOS_NOT_SUPPORTED);
+            return PublishResult.rejectedWithDisconnect(MqttDisconnectReasonCode.QOS_NOT_SUPPORTED);
         }
 
         List<PublishDelivery> deliveries = new ArrayList<>();
