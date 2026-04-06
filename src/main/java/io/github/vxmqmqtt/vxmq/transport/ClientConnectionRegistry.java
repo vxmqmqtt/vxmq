@@ -22,14 +22,14 @@ public class ClientConnectionRegistry {
             String requestedClientId,
             String protocolName,
             int protocolVersion,
-            boolean cleanSession) {
+            boolean startCleanSession) {
         ClientConnection connection = new ClientConnection(
                 UUID.randomUUID().toString(),
                 remoteAddress,
                 requestedClientId,
                 protocolName,
                 protocolVersion,
-                cleanSession);
+                startCleanSession);
         connection.transitionTo(ConnectionState.CONNECTING);
         connections.put(connection.connectionId(), connection);
         return connection;

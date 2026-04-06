@@ -33,7 +33,8 @@ public interface ProtocolEngine {
     UnsubscribeResult handleUnsubscribe(ClientConnection connection, UnsubscribeRequest request);
 
     /**
-     * Processes an inbound PUBLISH and returns either deliveries or a disconnect decision.
+     * Processes an inbound PUBLISH and returns whether it was accepted, plus any deliveries,
+     * acknowledgements, or disconnect requirement produced by protocol handling.
      */
     PublishResult handlePublish(ClientConnection connection, PublishRequest request);
 

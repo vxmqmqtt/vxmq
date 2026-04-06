@@ -11,6 +11,7 @@
 ## 会话与连接的关系
 
 - 连接是网络层对象，由 `transport` 和 `ClientConnectionRegistry` 管理。
+- `ClientConnection` 内部只保存 broker 侧统一的“start clean”连接标志；MQTT 3.1.1 的 `Clean Session` 与 MQTT 5 的 `Clean Start` 在进入协议建模前不复用同一个协议术语字段名。
 - 会话是 `clientId` 归属的协议状态，由 `SessionRegistry` 管理。
 - 同一时刻一个 `clientId` 最多只有一个当前活跃连接，但可以存在一个离线会话。
 - 连接关闭不等于会话必然删除；是否保留会话由 MQTT 版本和连接时策略决定。

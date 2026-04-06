@@ -4,6 +4,8 @@ import java.util.Objects;
 
 /**
  * Broker-side view of a transport connection and its negotiated MQTT identity.
+ * The start-clean flag is a broker-internal abstraction: it maps to MQTT 3.1.1 Clean Session
+ * and MQTT 5 Clean Start without preserving version-specific field names here.
  */
 public final class ClientConnection {
 
@@ -12,7 +14,7 @@ public final class ClientConnection {
     private final String requestedClientId;
     private final String protocolName;
     private final int protocolVersion;
-    private final boolean cleanSession;
+    private final boolean startCleanSession;
     private volatile String effectiveClientId;
     private volatile ConnectionState state;
 
@@ -22,13 +24,13 @@ public final class ClientConnection {
             String requestedClientId,
             String protocolName,
             int protocolVersion,
-            boolean cleanSession) {
+            boolean startCleanSession) {
         this.connectionId = Objects.requireNonNull(connectionId, "connectionId");
         this.remoteAddress = remoteAddress == null ? "unknown" : remoteAddress;
         this.requestedClientId = requestedClientId == null ? "" : requestedClientId;
         this.protocolName = protocolName == null ? "" : protocolName;
         this.protocolVersion = protocolVersion;
-        this.cleanSession = cleanSession;
+        this.startCleanSession = startCleanSession;
         this.state = ConnectionState.NEW;
     }
 
@@ -55,8 +57,11 @@ public final class ClientConnection {
         return protocolVersion;
     }
 
-    public boolean cleanSession() {
-        return cleanSession;
+    /**
+     * Returns whether this connection requested a fresh session start.
+     */
+    public boolean startCleanSession() {
+        return startCleanSession;
     }
 
     public String effectiveClientId() {

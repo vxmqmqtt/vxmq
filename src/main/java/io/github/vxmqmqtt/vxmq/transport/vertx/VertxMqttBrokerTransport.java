@@ -89,6 +89,8 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
     }
 
     private void handleEndpoint(MqttEndpoint endpoint) {
+        // The raw Vert.x flag carries MQTT 3.1.1 Clean Session or MQTT 5 Clean Start;
+        // ClientConnection stores only the broker-side "start clean" intent.
         ClientConnection connection = connectionRegistry.open(
                 endpoint.remoteAddress().toString(),
                 endpoint.clientIdentifier(),
