@@ -10,6 +10,7 @@ import io.github.vxmqmqtt.vxmq.auth.PermitAllAuthProvider;
 import io.github.vxmqmqtt.vxmq.observability.BrokerEventSink;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectDecision;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.PublishDelivery;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscribeResult;
@@ -17,6 +18,8 @@ import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionItem;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeRequest;
+import io.github.vxmqmqtt.vxmq.retained.InMemoryRetainedMessageRegistry;
+import io.github.vxmqmqtt.vxmq.retained.RetainedMessageRegistry;
 import io.github.vxmqmqtt.vxmq.routing.DefaultTopicMatcher;
 import io.github.vxmqmqtt.vxmq.routing.InMemorySubscriptionRegistry;
 import io.github.vxmqmqtt.vxmq.routing.SubscriptionRegistry;
@@ -43,6 +46,7 @@ class DefaultProtocolEngineTest {
 
     private ClientConnectionRegistry connectionRegistry;
     private SessionRegistry sessionRegistry;
+    private RetainedMessageRegistry retainedMessageRegistry;
     private SubscriptionRegistry subscriptionRegistry;
     private DefaultProtocolEngine protocolEngine;
 
@@ -51,10 +55,12 @@ class DefaultProtocolEngineTest {
         DefaultTopicMatcher topicMatcher = new DefaultTopicMatcher();
         connectionRegistry = new ClientConnectionRegistry();
         sessionRegistry = new InMemorySessionRegistry();
+        retainedMessageRegistry = new InMemoryRetainedMessageRegistry(topicMatcher);
         subscriptionRegistry = new InMemorySubscriptionRegistry(topicMatcher);
         protocolEngine = new DefaultProtocolEngine(
                 new PermitAllAuthProvider(),
                 sessionRegistry,
+                retainedMessageRegistry,
                 subscriptionRegistry,
                 topicMatcher,
                 new NoOpBrokerEventSink(),
@@ -343,6 +349,81 @@ class DefaultProtocolEngineTest {
         protocolEngine.handlePubAck(subscriber, result.deliveries().getFirst().packetId());
 
         assertEquals(0, sessionRegistry.find("subscriber-qos1-online").orElseThrow().inflightMessageCount());
+    }
+
+    // Verifies that retained publishes are stored and replayed immediately after a matching subscribe.
+    @Test
+    void shouldReplayRetainedMessageAfterSubscribe() {
+        ClientConnection publisher = connectClient("publisher-retained", 5, true, false, 0L);
+
+        PublishResult publishResult = protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                0,
+                0,
+                true,
+                false,
+                "retained-payload".getBytes()));
+
+        assertTrue(publishResult.accepted());
+        assertTrue(retainedMessageRegistry.findExact("sensors/room-1/temperature").isPresent());
+
+        ClientConnection subscriber = connectClient("subscriber-retained", 5, true, false, 0L);
+        SubscribeResult subscribeResult = protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 0))));
+
+        assertEquals(1, subscribeResult.retainedDeliveries().size());
+        PublishDelivery retainedDelivery = subscribeResult.retainedDeliveries().getFirst();
+        assertEquals("subscriber-retained", retainedDelivery.clientId());
+        assertEquals("sensors/room-1/temperature", retainedDelivery.topicName());
+        assertEquals(MqttQoS.AT_MOST_ONCE, retainedDelivery.grantedQos());
+        assertTrue(retainedDelivery.retain());
+    }
+
+    // Verifies that retained publishes use the minimum of retained QoS and granted subscription QoS.
+    @Test
+    void shouldUseMinimumQosForRetainedReplay() {
+        ClientConnection publisher = connectClient("publisher-retained-qos1", 5, true, false, 0L);
+        protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                33,
+                1,
+                true,
+                false,
+                "retained-qos1".getBytes()));
+
+        ClientConnection subscriber = connectClient("subscriber-retained-qos1", 5, false, false, 60L);
+        SubscribeResult subscribeResult = protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 1))));
+
+        assertEquals(1, subscribeResult.retainedDeliveries().size());
+        PublishDelivery retainedDelivery = subscribeResult.retainedDeliveries().getFirst();
+        assertEquals(MqttQoS.AT_LEAST_ONCE, retainedDelivery.grantedQos());
+        assertNotNull(retainedDelivery.packetId());
+        assertEquals(1, sessionRegistry.find("subscriber-retained-qos1").orElseThrow().inflightMessageCount());
+    }
+
+    // Verifies that retained messages are removed when a retained publish carries an empty payload.
+    @Test
+    void shouldRemoveRetainedMessageWhenPayloadIsEmpty() {
+        ClientConnection publisher = connectClient("publisher-retained-clear", 5, true, false, 0L);
+        protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                34,
+                0,
+                true,
+                false,
+                "retained-payload".getBytes()));
+
+        PublishResult clearResult = protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                35,
+                0,
+                true,
+                false,
+                new byte[0]));
+
+        assertTrue(clearResult.accepted());
+        assertTrue(retainedMessageRegistry.findExact("sensors/room-1/temperature").isEmpty());
     }
 
     // Verifies that QoS 1 publishes for offline persistent subscribers are queued instead of dropped.

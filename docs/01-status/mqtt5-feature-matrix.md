@@ -32,7 +32,7 @@
 | QoS | QoS 2 | M3 | 不支持 | 不支持 | 未开始 | 含 PUBREC / PUBREL / PUBCOMP 状态机 |
 | 状态管理 | Session State | M2 | 基础支持 | 基础支持 | 已验证 | 当前已支持在线/离线/过期、离线队列与 QoS 1 inflight |
 | 状态管理 | 离线消息与重连投递 | M2 | 基础支持 | 基础支持 | 已验证 | 当前为单机、内存态 QoS 1 恢复；不含跨重启恢复 |
-| 状态管理 | Retained Message | M2 | 不支持 | 不支持 | 未开始 | 含覆盖、清除与订阅后下发 |
+| 状态管理 | Retained Message | M2 | 基础支持 | 基础支持 | 已验证 | 已覆盖写入、清除与订阅后下发；不含高级 retain 属性 |
 | 状态管理 | Will Message | M2 | 不支持 | 不支持 | 未开始 | 含异常断开触发条件 |
 | 状态管理 | Will Delay Interval | M5 | 不适用 | 不支持 | 未开始 | MQTT 5 高级遗嘱属性 |
 | MQTT 5 属性 | User Property | M3 | 不适用 | 不支持 | 未开始 | 透传与可见性验证 |

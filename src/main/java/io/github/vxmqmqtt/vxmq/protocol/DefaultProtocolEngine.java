@@ -14,6 +14,8 @@ import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeItemResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeRequest;
+import io.github.vxmqmqtt.vxmq.retained.RetainedMessage;
+import io.github.vxmqmqtt.vxmq.retained.RetainedMessageRegistry;
 import io.github.vxmqmqtt.vxmq.routing.SubscriptionBinding;
 import io.github.vxmqmqtt.vxmq.routing.SubscriptionRegistry;
 import io.github.vxmqmqtt.vxmq.routing.TopicMatcher;
@@ -46,6 +48,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
 
     private final AuthProvider authProvider;
     private final SessionRegistry sessionRegistry;
+    private final RetainedMessageRegistry retainedMessageRegistry;
     private final SubscriptionRegistry subscriptionRegistry;
     private final TopicMatcher topicMatcher;
     private final BrokerEventSink brokerEventSink;
@@ -54,12 +57,14 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     public DefaultProtocolEngine(
             AuthProvider authProvider,
             SessionRegistry sessionRegistry,
+            RetainedMessageRegistry retainedMessageRegistry,
             SubscriptionRegistry subscriptionRegistry,
             TopicMatcher topicMatcher,
             BrokerEventSink brokerEventSink,
             ClientConnectionRegistry connectionRegistry) {
         this.authProvider = authProvider;
         this.sessionRegistry = sessionRegistry;
+        this.retainedMessageRegistry = retainedMessageRegistry;
         this.subscriptionRegistry = subscriptionRegistry;
         this.topicMatcher = topicMatcher;
         this.brokerEventSink = brokerEventSink;
@@ -106,6 +111,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     @Override
     public SubscribeResult handleSubscribe(ClientConnection connection, SubscriptionRequest request) {
         List<SubscriptionItemResult> results = new ArrayList<>();
+        List<PublishDelivery> retainedDeliveries = new ArrayList<>();
         for (SubscriptionItem item : request.items()) {
             String topicFilter = item.topicFilter();
             if (!topicMatcher.isValidFilter(topicFilter)) {
@@ -129,6 +135,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                         grantedQos));
                 brokerEventSink.subscriptionAdded(connection, topicFilter);
                 results.add(SubscriptionItemResult.granted(topicFilter, grantedQos));
+                retainedDeliveries.addAll(buildRetainedDeliveries(connection.effectiveClientId(), topicFilter, grantedQos));
             } catch (RuntimeException exception) {
                 // Roll back the session view if the routing registry write fails.
                 sessionRegistry.removeSubscription(connection.effectiveClientId(), topicFilter);
@@ -136,7 +143,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 results.add(SubscriptionItemResult.rejected(topicFilter, MqttSubAckReasonCode.UNSPECIFIED_ERROR));
             }
         }
-        return new SubscribeResult(results);
+        return new SubscribeResult(results, retainedDeliveries);
     }
 
     @Override
@@ -178,6 +185,8 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             brokerEventSink.protocolWarning(connection, "Rejected unsupported inbound QoS: " + request.qos());
             return PublishResult.rejectedWithDisconnect(MqttDisconnectReasonCode.QOS_NOT_SUPPORTED);
         }
+
+        updateRetainedMessageIfRequested(request);
 
         List<PublishDelivery> deliveries = new ArrayList<>();
         int queuedMessageCount = 0;
@@ -352,6 +361,53 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     private MqttQoS grantedDeliveryQos(int publishQos, MqttQoS subscriptionQos) {
         int value = Math.min(publishQos, subscriptionQos.value());
         return value == 0 ? MqttQoS.AT_MOST_ONCE : MqttQoS.AT_LEAST_ONCE;
+    }
+
+    private void updateRetainedMessageIfRequested(PublishRequest request) {
+        if (!request.retain()) {
+            return;
+        }
+
+        if (request.payloadSize() == 0) {
+            retainedMessageRegistry.removeRetained(request.topicName());
+            return;
+        }
+
+        retainedMessageRegistry.putRetained(
+                request.topicName(),
+                request.payload(),
+                request.qos() == 0 ? MqttQoS.AT_MOST_ONCE : MqttQoS.AT_LEAST_ONCE);
+    }
+
+    private List<PublishDelivery> buildRetainedDeliveries(String clientId, String topicFilter, MqttQoS grantedQos) {
+        List<PublishDelivery> deliveries = new ArrayList<>();
+        for (RetainedMessage retainedMessage : retainedMessageRegistry.findMatching(topicFilter)) {
+            MqttQoS deliveryQos = grantedDeliveryQos(retainedMessage.qos().value(), grantedQos);
+            if (deliveryQos == MqttQoS.AT_MOST_ONCE) {
+                deliveries.add(new PublishDelivery(
+                        clientId,
+                        retainedMessage.topicName(),
+                        retainedMessage.payloadCopy(),
+                        MqttQoS.AT_MOST_ONCE,
+                        true,
+                        false,
+                        null,
+                        false));
+                continue;
+            }
+
+            sessionRegistry.createInflightMessage(
+                            clientId,
+                            retainedMessage.topicName(),
+                            retainedMessage.payloadCopy(),
+                            MqttQoS.AT_LEAST_ONCE,
+                            true,
+                            false,
+                            false)
+                    .map(inflightMessage -> toPublishDelivery(clientId, inflightMessage))
+                    .ifPresent(deliveries::add);
+        }
+        return deliveries;
     }
 
     private PublishDelivery toPublishDelivery(String clientId, InflightMessage inflightMessage) {

@@ -16,6 +16,7 @@
 - 持久会话订阅恢复与会话懒清理
 - QoS 1 入站与出站主链路
 - 持久会话离线 QoS 1 消息积压与重连恢复
+- Retained Message 基础语义
 - SUBSCRIBE / SUBACK
 - UNSUBSCRIBE / UNSUBACK
 - PUBLISH QoS 0 主链路
@@ -28,7 +29,7 @@
 
 - 当前实现是单机、内存态 Broker。
 - 当前主链路已覆盖 QoS 0 / QoS 1，但仍不支持 QoS 2。
-- 当前已实现会话过期的懒清理、持久会话订阅恢复以及离线 QoS 1 消息恢复，但尚未实现 Retained Message、Will Message、用户名密码鉴权和 TLS。
+- 当前已实现会话过期的懒清理、持久会话订阅恢复、离线 QoS 1 消息恢复以及 Retained Message 基础语义，但尚未实现 Will Message、用户名密码鉴权和 TLS。
 - 当前路由和会话状态均为内存实现，不具备持久化和重启恢复能力。
 
 ## 当前文档真相入口
@@ -43,10 +44,10 @@
 ## 当前主要缺口
 
 - QoS 2 状态机尚未进入设计与实现。
-- Retained Message、Will Message，以及更完整的可靠性语义尚未落地。
+- Will Message，以及更完整的可靠性语义尚未落地。
 - 订阅树 / 路由索引重构尚未开始。
 - 基础鉴权、观测、运维和恢复能力尚未进入实现阶段。
 
 ## 下一阶段入口
 
-`M2` 的下一步重点从“会话恢复”转向“可靠性补全”：Retained Message、Will Message，以及为后续高级订阅能力做准备的订阅树 / 路由索引重构。
+`M2` 的下一步重点从“会话恢复”转向“可靠性补全”：Will Message，以及为后续高级订阅能力做准备的订阅树 / 路由索引重构。

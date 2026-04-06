@@ -5,6 +5,7 @@
 ## 目的与范围
 
 - 接收并校验入站 PUBLISH
+- 处理 Retained Message 的写入、覆盖与清除
 - 根据 Topic Name 查找命中订阅者
 - 对在线订阅者执行消息投递
 - 对离线持久会话执行 QoS 1 离线积压与重连恢复
@@ -31,6 +32,7 @@
 
 - Topic Name 合法
 - QoS 在当前实现范围内
+- `retain=true` 时，retained store 按规则完成写入、覆盖或清除
 - 命中订阅者收到消息，或对离线持久会话完成入队
 - 单个目标写失败不会回滚整个发布结果
 
@@ -62,6 +64,6 @@
 
 - 当前支持入站 QoS 0 / QoS 1
 - 当前支持出站 QoS 0 / QoS 1
-- 当前未实现 Retained Message
+- 当前已实现 Retained Message 的写入、清除与订阅后下发
 - 当前已实现离线 QoS 1 积压与重连恢复
 - 当前仍未实现 QoS 2 的入站与出站状态机

@@ -161,6 +161,8 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
             } else {
                 endpoint.subscribeAcknowledge(subscribe.messageId(), subscribeResult.grantedQosLevels());
             }
+
+            subscribeResult.retainedDeliveries().forEach(this::sendPublishToSubscriber);
         });
 
         endpoint.unsubscribeHandler(unsubscribe -> {

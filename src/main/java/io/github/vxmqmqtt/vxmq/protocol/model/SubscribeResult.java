@@ -7,7 +7,9 @@ import java.util.List;
 /**
  * Result of processing one SUBSCRIBE packet.
  */
-public record SubscribeResult(List<SubscriptionItemResult> itemResults) {
+public record SubscribeResult(
+        List<SubscriptionItemResult> itemResults,
+        List<PublishDelivery> retainedDeliveries) {
 
     /**
      * Converts item results to MQTT 3.1.1 style granted QoS values.

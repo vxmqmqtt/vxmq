@@ -16,10 +16,12 @@
 6. [`02-architecture/architecture-overview.md`](02-architecture/architecture-overview.md)
 7. [`02-architecture/session-model.md`](02-architecture/session-model.md)
 8. [`02-architecture/offline-message-model.md`](02-architecture/offline-message-model.md)
-9. [`03-protocol/connect-flow.md`](03-protocol/connect-flow.md)
-10. [`03-protocol/session-lifecycle.md`](03-protocol/session-lifecycle.md)
-11. [`03-protocol/qos1-flow.md`](03-protocol/qos1-flow.md)
-12. [`07-project/collaboration.md`](07-project/collaboration.md)
+9. [`02-architecture/retained-message-model.md`](02-architecture/retained-message-model.md)
+10. [`03-protocol/connect-flow.md`](03-protocol/connect-flow.md)
+11. [`03-protocol/session-lifecycle.md`](03-protocol/session-lifecycle.md)
+12. [`03-protocol/qos1-flow.md`](03-protocol/qos1-flow.md)
+13. [`03-protocol/retain-flow.md`](03-protocol/retain-flow.md)
+14. [`07-project/collaboration.md`](07-project/collaboration.md)
 
 ## 目录说明
 
@@ -43,11 +45,11 @@
 
 ### `02-architecture`
 
-系统整体架构、模块边界、会话模型、离线消息模型和 Topic 路由设计。
+系统整体架构、模块边界、会话模型、离线消息模型、Retained Message 模型和 Topic 路由设计。
 
 ### `03-protocol`
 
-Broker 对 CONNECT、会话生命周期、QoS 1、SUBSCRIBE / UNSUBSCRIBE、PUBLISH 的长期协议行为说明。
+Broker 对 CONNECT、会话生命周期、QoS 1、Retained Message、SUBSCRIBE / UNSUBSCRIBE、PUBLISH 的长期协议行为说明。
 
 ### `07-project`
 
