@@ -18,6 +18,8 @@
 - reconnect
 - session expiry
 
+在内部 CONNECT 建模中，`cleanSession` 和 `cleanStart` 显式区分字段适用性：MQTT 3.1.1 只使用 `cleanSession`，MQTT 5 只使用 `cleanStart`，不适用字段为 `null`。
+
 ## 生命周期状态图
 
 ```mermaid

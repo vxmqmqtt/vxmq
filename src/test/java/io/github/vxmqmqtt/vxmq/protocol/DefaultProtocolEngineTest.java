@@ -504,23 +504,18 @@ class DefaultProtocolEngineTest {
     }
 
     private ConnectRequest mqtt311Connect(String clientId, boolean cleanSession) {
-        return new ConnectRequest(
+        return ConnectRequest.mqtt311(
                 clientId,
                 "MQTT",
-                4,
                 cleanSession,
-                false,
-                null,
                 null,
                 false);
     }
 
     private ConnectRequest mqtt5Connect(String clientId, boolean cleanStart, long sessionExpiryIntervalSeconds) {
-        return new ConnectRequest(
+        return ConnectRequest.mqtt5(
                 clientId,
                 "MQTT",
-                5,
-                false,
                 cleanStart,
                 sessionExpiryIntervalSeconds,
                 null,

@@ -289,7 +289,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         }
 
         // MQTT 3.1.1 requires a persistent session to carry a non-empty client identifier.
-        if (request.isMqtt311() && !request.cleanSession()) {
+        if (request.isMqtt311() && !request.mqtt311CleanSession()) {
             return null;
         }
 

@@ -20,6 +20,8 @@
 - 用户名密码
 - Keep Alive
 
+在 broker 内部建模中，MQTT 3.1.1 仅携带 `cleanSession`，MQTT 5 仅携带 `cleanStart`；不适用字段使用 `null` 表示，而不是用 `false` 占位。
+
 ## 交互时序
 
 ```mermaid

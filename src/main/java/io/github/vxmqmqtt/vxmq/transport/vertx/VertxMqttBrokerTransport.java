@@ -95,15 +95,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                 endpoint.protocolName(),
                 endpoint.protocolVersion(),
                 endpoint.isCleanSession());
-        ConnectDecision decision = protocolEngine.handleConnect(connection, new ConnectRequest(
-                endpoint.clientIdentifier(),
-                endpoint.protocolName(),
-                endpoint.protocolVersion(),
-                endpoint.protocolVersion() == 4 && endpoint.isCleanSession(),
-                endpoint.protocolVersion() == 5 && endpoint.isCleanSession(),
-                endpoint.protocolVersion() == 5 ? sessionExpiryIntervalSeconds(endpoint.connectProperties()) : null,
-                username(endpoint.auth()),
-                passwordPresent(endpoint.auth())));
+        ConnectDecision decision = protocolEngine.handleConnect(connection, buildConnectRequest(endpoint));
 
         if (!decision.accepted()) {
             endpoint.reject(decision.returnCode(), decision.responseProperties());
@@ -185,6 +177,36 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
             endpointsByConnectionId.remove(connection.internalId());
             connectionRegistry.close(connection.internalId());
         });
+    }
+
+    private ConnectRequest buildConnectRequest(MqttEndpoint endpoint) {
+        if (endpoint.protocolVersion() == 4) {
+            return ConnectRequest.mqtt311(
+                    endpoint.clientIdentifier(),
+                    endpoint.protocolName(),
+                    endpoint.isCleanSession(),
+                    username(endpoint.auth()),
+                    passwordPresent(endpoint.auth()));
+        }
+        if (endpoint.protocolVersion() == 5) {
+            return ConnectRequest.mqtt5(
+                    endpoint.clientIdentifier(),
+                    endpoint.protocolName(),
+                    endpoint.isCleanSession(),
+                    sessionExpiryIntervalSeconds(endpoint.connectProperties()),
+                    username(endpoint.auth()),
+                    passwordPresent(endpoint.auth()));
+        }
+
+        return new ConnectRequest(
+                endpoint.clientIdentifier(),
+                endpoint.protocolName(),
+                endpoint.protocolVersion(),
+                null,
+                null,
+                null,
+                username(endpoint.auth()),
+                passwordPresent(endpoint.auth()));
     }
 
     private void closeSupersededConnection(String connectionId) {
