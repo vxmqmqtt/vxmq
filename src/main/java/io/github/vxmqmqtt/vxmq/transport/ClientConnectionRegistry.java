@@ -31,15 +31,15 @@ public class ClientConnectionRegistry {
                 protocolVersion,
                 cleanSession);
         connection.transitionTo(ConnectionState.CONNECTING);
-        connections.put(connection.internalId(), connection);
+        connections.put(connection.connectionId(), connection);
         return connection;
     }
 
     /**
-     * Returns the connection with the supplied internal id if it is still known.
+     * Returns the connection with the supplied connection id if it is still known.
      */
-    public Optional<ClientConnection> find(String internalId) {
-        return Optional.ofNullable(connections.get(internalId));
+    public Optional<ClientConnection> find(String connectionId) {
+        return Optional.ofNullable(connections.get(connectionId));
     }
 
     /**
@@ -63,12 +63,12 @@ public class ClientConnectionRegistry {
     /**
      * Removes a connection from the registry and clears any active client-id mapping it owns.
      */
-    public void close(String internalId) {
-        ClientConnection connection = connections.remove(internalId);
+    public void close(String connectionId) {
+        ClientConnection connection = connections.remove(connectionId);
         if (connection != null) {
             String effectiveClientId = connection.effectiveClientId();
             if (effectiveClientId != null) {
-                activeConnectionIdsByClientId.remove(effectiveClientId, internalId);
+                activeConnectionIdsByClientId.remove(effectiveClientId, connectionId);
             }
             connection.transitionTo(ConnectionState.CLOSED);
         }

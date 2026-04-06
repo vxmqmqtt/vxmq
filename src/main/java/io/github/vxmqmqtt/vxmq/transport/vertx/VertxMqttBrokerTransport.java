@@ -99,13 +99,13 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
 
         if (!decision.accepted()) {
             endpoint.reject(decision.returnCode(), decision.responseProperties());
-            connectionRegistry.close(connection.internalId());
+            connectionRegistry.close(connection.connectionId());
             return;
         }
 
         endpoint.setClientIdentifier(decision.effectiveClientId());
         endpoint.accept(decision.sessionPresent(), decision.responseProperties());
-        endpointsByConnectionId.put(connection.internalId(), endpoint);
+        endpointsByConnectionId.put(connection.connectionId(), endpoint);
         installHandlers(connection, endpoint);
         // The transport closes the old socket after the new client id binding is accepted.
         if (decision.supersededConnectionId() != null) {
@@ -174,8 +174,8 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
         endpoint.publishAcknowledgeHandler(packetId -> protocolEngine.handlePubAck(connection, packetId));
         endpoint.closeHandler(() -> {
             protocolEngine.handleConnectionClosed(connection);
-            endpointsByConnectionId.remove(connection.internalId());
-            connectionRegistry.close(connection.internalId());
+            endpointsByConnectionId.remove(connection.connectionId());
+            connectionRegistry.close(connection.connectionId());
         });
     }
 

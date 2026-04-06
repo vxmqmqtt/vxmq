@@ -126,7 +126,7 @@ class DefaultProtocolEngineTest {
         assertTrue(firstDecision.accepted());
         assertTrue(secondDecision.accepted());
         assertNull(firstDecision.supersededConnectionId());
-        assertEquals(firstConnection.internalId(), secondDecision.supersededConnectionId());
+        assertEquals(firstConnection.connectionId(), secondDecision.supersededConnectionId());
     }
 
     // Verifies that MQTT 3.1.1 cleanSession=false restores an existing persistent session.
@@ -461,7 +461,7 @@ class DefaultProtocolEngineTest {
         protocolEngine.handleDisconnect(connection);
 
         assertEquals(ConnectionState.DISCONNECTING, connection.state());
-        assertEquals(connection.internalId(),
+        assertEquals(connection.connectionId(),
                 sessionRegistry.find("disconnect-client").orElseThrow().connectionId());
     }
 
@@ -480,7 +480,7 @@ class DefaultProtocolEngineTest {
         closeClientConnection(firstConnection);
 
         assertEquals(ConnectionState.CLOSED, firstConnection.state());
-        assertEquals(secondConnection.internalId(),
+        assertEquals(secondConnection.connectionId(),
                 sessionRegistry.find("takeover-client").orElseThrow().connectionId());
     }
 
@@ -524,7 +524,7 @@ class DefaultProtocolEngineTest {
 
     private void closeClientConnection(ClientConnection connection) {
         protocolEngine.handleConnectionClosed(connection);
-        connectionRegistry.close(connection.internalId());
+        connectionRegistry.close(connection.connectionId());
     }
 
     /**

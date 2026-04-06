@@ -88,12 +88,12 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         MqttProperties responseProperties = buildConnectResponseProperties(request, effectiveClientId);
         SessionOpenResult sessionOpenResult = sessionRegistry.openSession(
                 effectiveClientId,
-                buildSessionOpenRequest(request, connection.internalId()));
+                buildSessionOpenRequest(request, connection.connectionId()));
         clearRoutingBindings(sessionOpenResult.clearedSession());
         connection.assignClientId(effectiveClientId);
         connection.transitionTo(ConnectionState.CONNECTED);
         // A new connection with the same client identifier replaces the old one.
-        String supersededConnectionId = connectionRegistry.bindClientId(effectiveClientId, connection.internalId())
+        String supersededConnectionId = connectionRegistry.bindClientId(effectiveClientId, connection.connectionId())
                 .orElse(null);
         brokerEventSink.connectionAccepted(connection);
         return ConnectDecision.accept(
@@ -241,7 +241,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         }
 
         ClientSession session = sessionRegistry.find(connection.effectiveClientId()).orElse(null);
-        if (session == null || !connection.internalId().equals(session.connectionId())) {
+        if (session == null || !connection.connectionId().equals(session.connectionId())) {
             return List.of();
         }
 
@@ -266,7 +266,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     @Override
     public void handleConnectionClosed(ClientConnection connection) {
         if (connection.effectiveClientId() != null) {
-            clearRoutingBindings(sessionRegistry.onConnectionClosed(connection.effectiveClientId(), connection.internalId())
+            clearRoutingBindings(sessionRegistry.onConnectionClosed(connection.effectiveClientId(), connection.connectionId())
                     .orElse(null));
         }
         connection.transitionTo(ConnectionState.CLOSED);

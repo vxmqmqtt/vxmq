@@ -7,7 +7,7 @@ import java.util.Objects;
  */
 public final class ClientConnection {
 
-    private final String internalId;
+    private final String connectionId;
     private final String remoteAddress;
     private final String requestedClientId;
     private final String protocolName;
@@ -17,13 +17,13 @@ public final class ClientConnection {
     private volatile ConnectionState state;
 
     public ClientConnection(
-            String internalId,
+            String connectionId,
             String remoteAddress,
             String requestedClientId,
             String protocolName,
             int protocolVersion,
             boolean cleanSession) {
-        this.internalId = Objects.requireNonNull(internalId, "internalId");
+        this.connectionId = Objects.requireNonNull(connectionId, "connectionId");
         this.remoteAddress = remoteAddress == null ? "unknown" : remoteAddress;
         this.requestedClientId = requestedClientId == null ? "" : requestedClientId;
         this.protocolName = protocolName == null ? "" : protocolName;
@@ -33,10 +33,10 @@ public final class ClientConnection {
     }
 
     /**
-     * Returns the broker-generated internal connection identifier.
+     * Returns the broker-generated connection identifier.
      */
-    public String internalId() {
-        return internalId;
+    public String connectionId() {
+        return connectionId;
     }
 
     public String remoteAddress() {
