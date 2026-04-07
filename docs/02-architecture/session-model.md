@@ -54,6 +54,7 @@ expiresAt != null"]
 - `subscriptions`：该会话拥有的订阅集合。
 - `queuedMessages`：该会话离线期间积压的待恢复 QoS 1 消息。
 - `inflightMessages`：已发送、等待订阅端 `PUBACK` 的 QoS 1 消息。
+- `willMessage`：当前会话生效中的基础遗嘱消息。
 
 ## 在线、离线与过期
 
@@ -94,6 +95,8 @@ expiresAt != null"]
 - 按协议层决策创建、更新、删除和查询会话
 - 在读取或修改会话前执行懒清理
 
+由于 `session` 是跨连接共享状态，而不是单个 event loop 私有的连接对象，所以它比 `connection` 层采用更保守的同步策略：简单字段使用可见性保证，离线队列、QoS inflight、packet id 分配和 will 清除/提取等复合状态使用显式同步保护原子性。
+
 `SessionRegistry` 不负责：
 
 - 管理在线 endpoint
@@ -116,10 +119,9 @@ expiresAt != null"]
 - 在线 / 离线 / 过期中的内部状态表示
 - 离线会话的订阅、离线消息与 QoS 1 inflight 承载
 - QoS 1 inflight 跟踪
+- 基础 Will Message 状态承载
 - 会话懒清理
 
 当前仍未覆盖：
 
-- Will Message 发布
-- Retained Message
 - 持久化与跨重启恢复

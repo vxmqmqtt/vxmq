@@ -92,6 +92,12 @@
 - 生命周期状态
 - 当前活跃连接索引
 
+并发约束：
+
+- `transport / connection` 默认运行在 Vert.x event loop 串行上下文中
+- `ClientConnection` 以连接级轻量状态为主，优先依赖 event loop 顺序执行
+- 若需要让其他线程观察连接状态，则使用 `volatile` 提供可见性，而不是把连接对象设计成重同步共享容器
+
 ### 会话级状态
 
 由 `SessionRegistry` 持有：
@@ -102,6 +108,12 @@
 - 会话过期配置与到期时间
 - 当前订阅集合
 
+并发约束：
+
+- `session` 属于跨连接共享状态
+- 同一会话可能被 reconnect、离线恢复、PUBACK、懒清理等不同路径访问
+- 对离线队列、QoS inflight、packet id 分配和 will 这类复合可变状态，允许使用显式同步保证原子性和一致性
+
 ### 路由级状态
 
 由 `SubscriptionRegistry` 持有：
@@ -109,6 +121,11 @@
 - Topic Filter 到订阅绑定的索引
 - Topic Name 命中结果
 - 由会话真相派生出的匹配视图，而不是订阅状态的唯一真相
+
+并发约束：
+
+- `routing` 是索引层，不强制绑定到 `transport / connection` 或 `session` 的同步策略
+- 它按索引结构自身的读写模式选择并发控制方式，但不能反过来定义会话真相
 
 ## 调用方向
 
