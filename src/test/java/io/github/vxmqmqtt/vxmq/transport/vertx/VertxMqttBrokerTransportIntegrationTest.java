@@ -183,6 +183,119 @@ class VertxMqttBrokerTransportIntegrationTest {
         assertEquals("retained-qos1-payload", receivedPayload.get(5, TimeUnit.SECONDS));
     }
 
+    // Verifies that a keep-alive timeout is treated as an abnormal close and publishes the configured will message.
+    @Test
+    void shouldPublishWillAfterKeepAliveTimeout() throws Exception {
+        int port = startBroker();
+        CompletableFuture<String> receivedPayload = new CompletableFuture<>();
+
+        subscriber = mqttClient("subscriber-will-timeout");
+        subscriber.publishHandler(message ->
+                receivedPayload.complete(message.payload().toString(StandardCharsets.UTF_8)));
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, subscriber.connect(port, "127.0.0.1").await().indefinitely().code());
+        subscriber.subscribe("status/+", 0).await().indefinitely();
+
+        publisher = mqttClientWithWill(
+                "publisher-will-timeout",
+                true,
+                1,
+                false,
+                "status/publisher-will-timeout",
+                "offline",
+                MqttQoS.AT_MOST_ONCE,
+                false);
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, publisher.connect(port, "127.0.0.1").await().indefinitely().code());
+
+        assertEquals("offline", receivedPayload.get(5, TimeUnit.SECONDS));
+    }
+
+    // Verifies that an explicit MQTT DISCONNECT suppresses the configured will message.
+    @Test
+    void shouldNotPublishWillAfterExplicitDisconnect() throws Exception {
+        int port = startBroker();
+        CompletableFuture<String> receivedPayload = new CompletableFuture<>();
+
+        subscriber = mqttClient("subscriber-will-disconnect");
+        subscriber.publishHandler(message ->
+                receivedPayload.complete(message.payload().toString(StandardCharsets.UTF_8)));
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, subscriber.connect(port, "127.0.0.1").await().indefinitely().code());
+        subscriber.subscribe("status/+", 0).await().indefinitely();
+
+        publisher = mqttClientWithWill(
+                "publisher-will-disconnect",
+                true,
+                20,
+                true,
+                "status/publisher-will-disconnect",
+                "offline",
+                MqttQoS.AT_MOST_ONCE,
+                false);
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, publisher.connect(port, "127.0.0.1").await().indefinitely().code());
+        publisher.disconnect().await().indefinitely();
+
+        assertThrows(TimeoutException.class, () -> receivedPayload.get(1, TimeUnit.SECONDS));
+    }
+
+    // Verifies that session takeover closes the old connection abnormally and therefore publishes its will.
+    @Test
+    void shouldPublishWillWhenClientSessionIsTakenOver() throws Exception {
+        int port = startBroker();
+        CompletableFuture<String> receivedPayload = new CompletableFuture<>();
+
+        subscriber = mqttClient("subscriber-will-takeover");
+        subscriber.publishHandler(message ->
+                receivedPayload.complete(message.payload().toString(StandardCharsets.UTF_8)));
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, subscriber.connect(port, "127.0.0.1").await().indefinitely().code());
+        subscriber.subscribe("status/+", 0).await().indefinitely();
+
+        publisher = mqttClientWithWill(
+                "publisher-will-takeover",
+                true,
+                20,
+                true,
+                "status/publisher-will-takeover",
+                "offline",
+                MqttQoS.AT_MOST_ONCE,
+                false);
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, publisher.connect(port, "127.0.0.1").await().indefinitely().code());
+
+        duplicateClient = mqttClient("publisher-will-takeover");
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, duplicateClient.connect(port, "127.0.0.1").await().indefinitely().code());
+
+        assertEquals("offline", receivedPayload.get(5, TimeUnit.SECONDS));
+    }
+
+    // Verifies that a retained will is stored and replayed to later subscribers after the publisher dies abnormally.
+    @Test
+    void shouldReplayRetainedWillToLaterSubscriber() throws Exception {
+        int port = startBroker();
+        CompletableFuture<String> receivedPayload = new CompletableFuture<>();
+        CompletableFuture<Void> closed = new CompletableFuture<>();
+
+        publisher = mqttClientWithWill(
+                "publisher-retained-will",
+                true,
+                1,
+                false,
+                "status/publisher-retained-will",
+                "offline",
+                MqttQoS.AT_MOST_ONCE,
+                true);
+        publisher.closeHandler(() -> closed.complete(null));
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, publisher.connect(port, "127.0.0.1").await().indefinitely().code());
+
+        // Wait until the broker closes the client and publishes the retained will.
+        closed.get(5, TimeUnit.SECONDS);
+
+        subscriber = mqttClient("subscriber-retained-will");
+        subscriber.publishHandler(message ->
+                receivedPayload.complete(message.payload().toString(StandardCharsets.UTF_8)));
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, subscriber.connect(port, "127.0.0.1").await().indefinitely().code());
+        subscriber.subscribe("status/+", 0).await().indefinitely();
+
+        assertEquals("offline", receivedPayload.get(5, TimeUnit.SECONDS));
+    }
+
     // Verifies that a second connection with the same client id causes the old connection to close.
     @Test
     void shouldClosePreviousConnectionWhenClientIdIsTakenOver() throws ExecutionException, InterruptedException, TimeoutException {
@@ -454,6 +567,29 @@ class VertxMqttBrokerTransportIntegrationTest {
                 .setCleanSession(cleanSession)
                 .setKeepAliveInterval(keepAliveIntervalSeconds)
                 .setAutoKeepAlive(autoKeepAlive);
+        return MqttClient.create(vertx, options);
+    }
+
+    private MqttClient mqttClientWithWill(
+            String clientId,
+            boolean cleanSession,
+            int keepAliveIntervalSeconds,
+            boolean autoKeepAlive,
+            String willTopic,
+            String willPayload,
+            MqttQoS willQos,
+            boolean willRetain) {
+        MqttClientOptions options = new MqttClientOptions()
+                .setAutoGeneratedClientId(false)
+                .setClientId(clientId)
+                .setCleanSession(cleanSession)
+                .setKeepAliveInterval(keepAliveIntervalSeconds)
+                .setAutoKeepAlive(autoKeepAlive)
+                .setWillFlag(true)
+                .setWillTopic(willTopic)
+                .setWillMessage(willPayload)
+                .setWillQoS(willQos.value())
+                .setWillRetain(willRetain);
         return MqttClient.create(vertx, options);
     }
 

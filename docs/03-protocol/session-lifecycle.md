@@ -73,6 +73,7 @@ stateDiagram-v2
 ### DISCONNECT
 
 - 客户端发送 `DISCONNECT` 时，连接先进入 `DISCONNECTING`
+- 当前连接上的 will 被立即清除
 - 会话删除或保留的最终决策仍在“连接真正关闭”时执行
 - 这样可以避免在接管或传输层收尾过程中提前破坏新连接会话
 
@@ -84,6 +85,7 @@ stateDiagram-v2
 - MQTT 5 且 `Session Expiry Interval=0`：立即删除
 - MQTT 5 且 `Session Expiry Interval>0`：转为离线并记录 `expiresAt`
 - 若持久会话存在未确认的 QoS 1 inflight 消息，这些消息会回退为离线队列
+- 若连接不是显式 `DISCONNECT` 结束，则会触发基础 Will Message 发布
 
 ## 重复 clientId 接管
 
@@ -100,6 +102,5 @@ stateDiagram-v2
 
 ## 当前阶段不包含的行为
 
-- Will Message 发布
-- Retained Message 下发
+- Will Delay Interval
 - 持久化与跨重启恢复

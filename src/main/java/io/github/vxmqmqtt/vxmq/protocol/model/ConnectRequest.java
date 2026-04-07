@@ -11,7 +11,8 @@ public record ConnectRequest(
         Boolean cleanStart,
         Long sessionExpiryIntervalSeconds,
         String username,
-        boolean passwordPresent) {
+        boolean passwordPresent,
+        WillMessage willMessage) {
 
     public ConnectRequest {
         validateProtocolSpecificFlags(protocolVersion, cleanSession, cleanStart);
@@ -25,7 +26,8 @@ public record ConnectRequest(
             String protocolName,
             boolean cleanSession,
             String username,
-            boolean passwordPresent) {
+            boolean passwordPresent,
+            WillMessage willMessage) {
         return new ConnectRequest(
                 requestedClientId,
                 protocolName,
@@ -34,7 +36,8 @@ public record ConnectRequest(
                 null,
                 null,
                 username,
-                passwordPresent);
+                passwordPresent,
+                willMessage);
     }
 
     /**
@@ -46,7 +49,8 @@ public record ConnectRequest(
             boolean cleanStart,
             Long sessionExpiryIntervalSeconds,
             String username,
-            boolean passwordPresent) {
+            boolean passwordPresent,
+            WillMessage willMessage) {
         return new ConnectRequest(
                 requestedClientId,
                 protocolName,
@@ -55,7 +59,8 @@ public record ConnectRequest(
                 cleanStart,
                 sessionExpiryIntervalSeconds,
                 username,
-                passwordPresent);
+                passwordPresent,
+                willMessage);
     }
 
     /**

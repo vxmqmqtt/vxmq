@@ -1,5 +1,6 @@
 package io.github.vxmqmqtt.vxmq.session;
 
+import io.github.vxmqmqtt.vxmq.protocol.model.WillMessage;
 import io.netty.handler.codec.mqtt.MqttQoS;
 
 import java.util.List;
@@ -61,6 +62,16 @@ public interface SessionRegistry {
      * Marks one inflight QoS 1 delivery as acknowledged.
      */
     boolean acknowledge(String clientId, int packetId);
+
+    /**
+     * Clears and returns the current will message for the live session if the connection still matches.
+     */
+    Optional<WillMessage> takeWillMessage(String clientId, String connectionId);
+
+    /**
+     * Discards the current will message for the live session if the connection still matches.
+     */
+    void discardWillMessage(String clientId, String connectionId);
 
     /**
      * Returns the session for a client if it exists.

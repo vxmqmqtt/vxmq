@@ -18,6 +18,7 @@ import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionItem;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.WillMessage;
 import io.github.vxmqmqtt.vxmq.retained.InMemoryRetainedMessageRegistry;
 import io.github.vxmqmqtt.vxmq.retained.RetainedMessageRegistry;
 import io.github.vxmqmqtt.vxmq.routing.DefaultTopicMatcher;
@@ -548,6 +549,43 @@ class DefaultProtocolEngineTest {
                 sessionRegistry.find("disconnect-client").orElseThrow().connectionId());
     }
 
+    // Verifies that an explicit DISCONNECT suppresses any stored will message when the socket later closes.
+    @Test
+    void shouldNotPublishWillAfterExplicitDisconnect() {
+        ClientConnection publisher = connectClient(
+                "publisher-explicit-disconnect",
+                5,
+                false,
+                false,
+                60L,
+                new WillMessage("status/publisher-explicit-disconnect", "offline".getBytes(), MqttQoS.AT_MOST_ONCE, true));
+        ClientConnection subscriber = connectClient("subscriber-explicit-disconnect", 5, true, false, 0L);
+        protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("status/+", 0))));
+
+        protocolEngine.handleDisconnect(publisher);
+        closeClientConnection(publisher);
+
+        assertTrue(retainedMessageRegistry.findExact("status/publisher-explicit-disconnect").isEmpty());
+    }
+
+    // Verifies that an abnormal close publishes the stored will through the normal publish path.
+    @Test
+    void shouldPublishWillAfterAbnormalClose() {
+        ClientConnection publisher = connectClient(
+                "publisher-will-abnormal",
+                5,
+                false,
+                false,
+                60L,
+                new WillMessage("status/publisher-will-abnormal", "offline".getBytes(), MqttQoS.AT_MOST_ONCE, true));
+
+        protocolEngine.handleConnectionClosed(publisher);
+        connectionRegistry.close(publisher.connectionId());
+
+        assertTrue(retainedMessageRegistry.findExact("status/publisher-will-abnormal").isPresent());
+    }
+
     // Verifies that closing a superseded connection does not accidentally unbind the newer takeover session.
     @Test
     void shouldKeepNewSessionBindingWhenSupersededConnectionCloses() {
@@ -573,6 +611,16 @@ class DefaultProtocolEngineTest {
             boolean cleanSession,
             boolean cleanStart,
             Long sessionExpiryIntervalSeconds) {
+        return connectClient(clientId, protocolVersion, cleanSession, cleanStart, sessionExpiryIntervalSeconds, null);
+    }
+
+    private ClientConnection connectClient(
+            String clientId,
+            int protocolVersion,
+            boolean cleanSession,
+            boolean cleanStart,
+            Long sessionExpiryIntervalSeconds,
+            WillMessage willMessage) {
         ClientConnection connection = connectionRegistry.open(
                 "127.0.0.1",
                 clientId,
@@ -580,29 +628,43 @@ class DefaultProtocolEngineTest {
                 protocolVersion,
                 protocolVersion == 4 ? cleanSession : cleanStart);
         ConnectDecision decision = protocolEngine.handleConnect(connection, protocolVersion == 4
-                ? mqtt311Connect(clientId, cleanSession)
-                : mqtt5Connect(clientId, cleanStart, sessionExpiryIntervalSeconds));
+                ? mqtt311Connect(clientId, cleanSession, willMessage)
+                : mqtt5Connect(clientId, cleanStart, sessionExpiryIntervalSeconds, willMessage));
         assertTrue(decision.accepted());
         return connection;
     }
 
     private ConnectRequest mqtt311Connect(String clientId, boolean cleanSession) {
+        return mqtt311Connect(clientId, cleanSession, null);
+    }
+
+    private ConnectRequest mqtt311Connect(String clientId, boolean cleanSession, WillMessage willMessage) {
         return ConnectRequest.mqtt311(
                 clientId,
                 "MQTT",
                 cleanSession,
                 null,
-                false);
+                false,
+                willMessage);
     }
 
     private ConnectRequest mqtt5Connect(String clientId, boolean cleanStart, long sessionExpiryIntervalSeconds) {
+        return mqtt5Connect(clientId, cleanStart, sessionExpiryIntervalSeconds, null);
+    }
+
+    private ConnectRequest mqtt5Connect(
+            String clientId,
+            boolean cleanStart,
+            long sessionExpiryIntervalSeconds,
+            WillMessage willMessage) {
         return ConnectRequest.mqtt5(
                 clientId,
                 "MQTT",
                 cleanStart,
                 sessionExpiryIntervalSeconds,
                 null,
-                false);
+                false,
+                willMessage);
     }
 
     private void closeClientConnection(ClientConnection connection) {

@@ -56,5 +56,5 @@ public interface ProtocolEngine {
     /**
      * Cleans up connection state after the underlying network channel has closed.
      */
-    void handleConnectionClosed(ClientConnection connection);
+    List<PublishDelivery> handleConnectionClosed(ClientConnection connection);
 }

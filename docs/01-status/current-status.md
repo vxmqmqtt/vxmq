@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-项目当前处于：`M1 已完成，M2 第二阶段已完成，M2 继续进行中`
+项目当前处于：`M1 已完成，M2 第三阶段已完成，M2 继续进行中`
 
 ## 当前已完成能力
 
@@ -17,6 +17,7 @@
 - QoS 1 入站与出站主链路
 - 持久会话离线 QoS 1 消息积压与重连恢复
 - Retained Message 基础语义
+- Will Message 基础语义
 - SUBSCRIBE / SUBACK
 - UNSUBSCRIBE / UNSUBACK
 - PUBLISH QoS 0 主链路
@@ -29,7 +30,7 @@
 
 - 当前实现是单机、内存态 Broker。
 - 当前主链路已覆盖 QoS 0 / QoS 1，但仍不支持 QoS 2。
-- 当前已实现会话过期的懒清理、持久会话订阅恢复、离线 QoS 1 消息恢复以及 Retained Message 基础语义，但尚未实现 Will Message、用户名密码鉴权和 TLS。
+- 当前已实现会话过期的懒清理、持久会话订阅恢复、离线 QoS 1 消息恢复、Retained Message 与基础 Will Message，但尚未实现用户名密码鉴权和 TLS。
 - 当前路由和会话状态均为内存实现，不具备持久化和重启恢复能力。
 
 ## 当前文档真相入口
@@ -37,6 +38,7 @@
 - 项目目标与边界：[`../00-foundation/vision.md`](../00-foundation/vision.md)、[`../00-foundation/scope.md`](../00-foundation/scope.md)
 - 协议兼容策略：[`../00-foundation/compatibility.md`](../00-foundation/compatibility.md)
 - 会话设计真相：[`../02-architecture/session-model.md`](../02-architecture/session-model.md)、[`../03-protocol/session-lifecycle.md`](../03-protocol/session-lifecycle.md)
+- Will 设计真相：[`../02-architecture/will-message-model.md`](../02-architecture/will-message-model.md)、[`../03-protocol/will-flow.md`](../03-protocol/will-flow.md)
 - 特性完成度：[`mqtt5-feature-matrix.md`](mqtt5-feature-matrix.md)
 - 阶段规划：[`milestones.md`](milestones.md)
 - 当前已完成阶段的历史验收：[`m1-acceptance-checklist.md`](m1-acceptance-checklist.md)
@@ -44,10 +46,9 @@
 ## 当前主要缺口
 
 - QoS 2 状态机尚未进入设计与实现。
-- Will Message，以及更完整的可靠性语义尚未落地。
 - 订阅树 / 路由索引重构尚未开始。
 - 基础鉴权、观测、运维和恢复能力尚未进入实现阶段。
 
 ## 下一阶段入口
 
-`M2` 的下一步重点从“会话恢复”转向“可靠性补全”：Will Message，以及为后续高级订阅能力做准备的订阅树 / 路由索引重构。
+`M2` 的下一步重点从“可靠性补全”转向“内部基础设施升级”：订阅树 / 路由索引重构，以及为 `M3` 的高级订阅和更细粒度属性语义做准备。

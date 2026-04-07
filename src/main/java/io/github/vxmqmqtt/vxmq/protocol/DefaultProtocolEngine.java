@@ -14,6 +14,7 @@ import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeItemResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.WillMessage;
 import io.github.vxmqmqtt.vxmq.retained.RetainedMessage;
 import io.github.vxmqmqtt.vxmq.retained.RetainedMessageRegistry;
 import io.github.vxmqmqtt.vxmq.routing.SubscriptionBinding;
@@ -96,6 +97,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 buildSessionOpenRequest(request, connection.connectionId()));
         clearRoutingBindings(sessionOpenResult.clearedSession());
         connection.assignClientId(effectiveClientId);
+        connection.assignWillMessage(request.willMessage());
         connection.transitionTo(ConnectionState.CONNECTED);
         // A new connection with the same client identifier replaces the old one.
         String supersededConnectionId = connectionRegistry.bindClientId(effectiveClientId, connection.connectionId())
@@ -269,16 +271,25 @@ public class DefaultProtocolEngine implements ProtocolEngine {
 
     @Override
     public void handleDisconnect(ClientConnection connection) {
+        if (connection.effectiveClientId() != null) {
+            sessionRegistry.discardWillMessage(connection.effectiveClientId(), connection.connectionId());
+        }
+        connection.clearWillMessage();
         connection.transitionTo(ConnectionState.DISCONNECTING);
     }
 
     @Override
-    public void handleConnectionClosed(ClientConnection connection) {
+    public List<PublishDelivery> handleConnectionClosed(ClientConnection connection) {
+        List<PublishDelivery> willDeliveries = List.of();
+        if (shouldPublishWill(connection)) {
+            willDeliveries = publishWill(connection);
+        }
         if (connection.effectiveClientId() != null) {
             clearRoutingBindings(sessionRegistry.onConnectionClosed(connection.effectiveClientId(), connection.connectionId())
                     .orElse(null));
         }
         connection.transitionTo(ConnectionState.CLOSED);
+        return willDeliveries;
     }
 
     private SessionOpenRequest buildSessionOpenRequest(ConnectRequest request, String connectionId) {
@@ -288,7 +299,8 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 request.startsFreshSession(),
                 request.retainsSessionOnDisconnect(),
                 sessionExpiryIntervalSeconds,
-                connectionId);
+                connectionId,
+                request.willMessage());
     }
 
     private String resolveClientId(ConnectRequest request) {
@@ -434,5 +446,29 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         for (String topicFilter : clearedSession.subscriptions()) {
             subscriptionRegistry.removeSubscription(clearedSession.clientId(), topicFilter);
         }
+    }
+
+    private boolean shouldPublishWill(ClientConnection connection) {
+        return connection.effectiveClientId() != null && connection.state() != ConnectionState.DISCONNECTING;
+    }
+
+    private List<PublishDelivery> publishWill(ClientConnection connection) {
+        WillMessage willMessage = connection.takeWillMessage();
+        if (willMessage == null) {
+            return List.of();
+        }
+
+        if (connection.effectiveClientId() != null) {
+            sessionRegistry.discardWillMessage(connection.effectiveClientId(), connection.connectionId());
+        }
+
+        PublishResult publishResult = handlePublish(connection, new PublishRequest(
+                willMessage.topicName(),
+                0,
+                willMessage.qos().value(),
+                willMessage.retain(),
+                false,
+                willMessage.payloadCopy()));
+        return publishResult.deliveries();
     }
 }

@@ -1,5 +1,6 @@
 package io.github.vxmqmqtt.vxmq.transport;
 
+import io.github.vxmqmqtt.vxmq.protocol.model.WillMessage;
 import java.util.Objects;
 
 /**
@@ -16,6 +17,7 @@ public final class ClientConnection {
     private final int protocolVersion;
     private final boolean startCleanSession;
     private volatile String effectiveClientId;
+    private volatile WillMessage willMessage;
     private volatile ConnectionState state;
 
     public ClientConnection(
@@ -69,6 +71,29 @@ public final class ClientConnection {
     }
 
     /**
+     * Stores the will message negotiated for this specific live connection.
+     */
+    public void assignWillMessage(WillMessage willMessage) {
+        this.willMessage = copyWillMessage(willMessage);
+    }
+
+    /**
+     * Clears the will for this live connection without returning it.
+     */
+    public void clearWillMessage() {
+        this.willMessage = null;
+    }
+
+    /**
+     * Clears and returns the will for this live connection so it can be published only once.
+     */
+    public WillMessage takeWillMessage() {
+        WillMessage current = willMessage;
+        willMessage = null;
+        return copyWillMessage(current);
+    }
+
+    /**
      * Stores the final client identifier assigned after CONNECT validation.
      */
     public void assignClientId(String clientId) {
@@ -84,5 +109,16 @@ public final class ClientConnection {
      */
     public void transitionTo(ConnectionState newState) {
         this.state = Objects.requireNonNull(newState, "newState");
+    }
+
+    private WillMessage copyWillMessage(WillMessage source) {
+        if (source == null) {
+            return null;
+        }
+        return new WillMessage(
+                source.topicName(),
+                source.payloadCopy(),
+                source.qos(),
+                source.retain());
     }
 }

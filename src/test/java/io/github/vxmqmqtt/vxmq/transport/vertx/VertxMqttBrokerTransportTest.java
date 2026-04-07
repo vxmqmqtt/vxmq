@@ -232,7 +232,8 @@ class VertxMqttBrokerTransportTest {
             }
 
             @Override
-            public void handleConnectionClosed(ClientConnection connection) {
+            public List<PublishDelivery> handleConnectionClosed(ClientConnection connection) {
+                return List.of();
             }
         };
     }

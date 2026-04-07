@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.netty.handler.codec.mqtt.MqttQoS;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -16,7 +17,7 @@ class ConnectRequestTest {
     // Verifies that MQTT 3.1.1 CONNECT requests expose cleanSession and leave cleanStart absent.
     @Test
     void shouldModelMqtt311FlagsWithNullCleanStart() {
-        ConnectRequest request = ConnectRequest.mqtt311("client-311", "MQTT", true, null, false);
+        ConnectRequest request = ConnectRequest.mqtt311("client-311", "MQTT", true, null, false, null);
 
         assertTrue(request.isMqtt311());
         assertFalse(request.isMqtt5());
@@ -30,7 +31,7 @@ class ConnectRequestTest {
     // Verifies that MQTT 5 CONNECT requests expose cleanStart and leave cleanSession absent.
     @Test
     void shouldModelMqtt5FlagsWithNullCleanSession() {
-        ConnectRequest request = ConnectRequest.mqtt5("client-5", "MQTT", false, 60L, null, false);
+        ConnectRequest request = ConnectRequest.mqtt5("client-5", "MQTT", false, 60L, null, false, null);
 
         assertFalse(request.isMqtt311());
         assertTrue(request.isMqtt5());
@@ -53,7 +54,8 @@ class ConnectRequestTest {
                 false,
                 null,
                 null,
-                false));
+                false,
+                null));
 
         assertTrue(error.getMessage().contains("must not include cleanStart"));
     }
@@ -69,8 +71,25 @@ class ConnectRequestTest {
                 true,
                 0L,
                 null,
-                false));
+                false,
+                null));
 
         assertTrue(error.getMessage().contains("must not include cleanSession"));
+    }
+
+    // Verifies that CONNECT requests can carry an optional will payload without losing protocol-specific flags.
+    @Test
+    void shouldModelOptionalWillMessage() {
+        WillMessage willMessage = new WillMessage(
+                "status/client-5",
+                "offline".getBytes(),
+                MqttQoS.AT_LEAST_ONCE,
+                true);
+
+        ConnectRequest request = ConnectRequest.mqtt5("client-5", "MQTT", false, 60L, null, false, willMessage);
+
+        assertEquals(willMessage, request.willMessage());
+        assertFalse(request.startsFreshSession());
+        assertTrue(request.retainsSessionOnDisconnect());
     }
 }

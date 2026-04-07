@@ -1,7 +1,7 @@
 package io.github.vxmqmqtt.vxmq.session;
 
 import io.github.vxmqmqtt.vxmq.config.BrokerRuntimeConfig;
-import io.netty.handler.codec.mqtt.MqttQoS;
+import io.github.vxmqmqtt.vxmq.protocol.model.WillMessage;
 import io.netty.handler.codec.mqtt.MqttQoS;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -48,18 +48,30 @@ public class InMemorySessionRegistry implements SessionRegistry {
                 clearedSession = removedSession;
             }
             ClientSession newSession = new ClientSession(clientId);
-            newSession.activate(request.connectionId(), request.persistent(), request.sessionExpiryIntervalSeconds());
+            newSession.activate(
+                    request.connectionId(),
+                    request.persistent(),
+                    request.sessionExpiryIntervalSeconds(),
+                    request.willMessage());
             sessions.put(clientId, newSession);
             return new SessionOpenResult(newSession, false, clearedSession);
         }
 
         if (existingSession != null) {
-            existingSession.activate(request.connectionId(), request.persistent(), request.sessionExpiryIntervalSeconds());
+            existingSession.activate(
+                    request.connectionId(),
+                    request.persistent(),
+                    request.sessionExpiryIntervalSeconds(),
+                    request.willMessage());
             return new SessionOpenResult(existingSession, true, clearedSession);
         }
 
         ClientSession newSession = new ClientSession(clientId);
-        newSession.activate(request.connectionId(), request.persistent(), request.sessionExpiryIntervalSeconds());
+        newSession.activate(
+                request.connectionId(),
+                request.persistent(),
+                request.sessionExpiryIntervalSeconds(),
+                request.willMessage());
         sessions.put(clientId, newSession);
         return new SessionOpenResult(newSession, false, clearedSession);
     }
@@ -143,6 +155,24 @@ public class InMemorySessionRegistry implements SessionRegistry {
         return find(clientId)
                 .map(session -> session.acknowledge(packetId))
                 .orElse(false);
+    }
+
+    @Override
+    public Optional<WillMessage> takeWillMessage(String clientId, String connectionId) {
+        ClientSession session = find(clientId).orElse(null);
+        if (session == null || !Objects.equals(connectionId, session.connectionId())) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(session.takeWillMessage());
+    }
+
+    @Override
+    public void discardWillMessage(String clientId, String connectionId) {
+        ClientSession session = find(clientId).orElse(null);
+        if (session == null || !Objects.equals(connectionId, session.connectionId())) {
+            return;
+        }
+        session.clearWillMessage();
     }
 
     @Override

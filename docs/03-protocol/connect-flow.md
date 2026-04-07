@@ -19,6 +19,7 @@
 - `Session Expiry Interval`
 - 用户名密码
 - Keep Alive
+- Will Message
 
 在 broker 内部建模中，MQTT 3.1.1 仅携带 `cleanSession`，MQTT 5 仅携带 `cleanStart`；不适用字段使用 `null` 表示，而不是用 `false` 占位。
 
@@ -99,5 +100,6 @@ sequenceDiagram
 
 - 当前已实现 MQTT 3.1.1 `Clean Session` 与 MQTT 5 `Clean Start / Session Expiry` 的会话打开、恢复和懒清理语义
 - 当前持久会话可恢复订阅，并可恢复离线 QoS 1 消息
+- 当前 CONNECT 已支持提取和保存基础 Will Message
 - 当前未实现 MQTT 5 更多 CONNECT / CONNACK 属性
 - 当前会话绑定仍是内存态单机实现

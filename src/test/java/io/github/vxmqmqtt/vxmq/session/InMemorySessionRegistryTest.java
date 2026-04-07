@@ -29,7 +29,7 @@ class InMemorySessionRegistryTest {
     void shouldCreateNewNonPersistentSession() {
         SessionOpenResult result = sessionRegistry.openSession(
                 "ephemeral-client",
-                new SessionOpenRequest(true, false, null, "connection-1"));
+                new SessionOpenRequest(true, false, null, "connection-1", null));
 
         assertFalse(result.sessionPresent());
         assertEquals("connection-1", result.session().connectionId());
@@ -42,7 +42,7 @@ class InMemorySessionRegistryTest {
     void shouldCreatePersistentSession() {
         SessionOpenResult result = sessionRegistry.openSession(
                 "persistent-client",
-                new SessionOpenRequest(false, true, null, "connection-1"));
+                new SessionOpenRequest(false, true, null, "connection-1", null));
 
         assertFalse(result.sessionPresent());
         assertTrue(result.session().persistent());
@@ -54,13 +54,13 @@ class InMemorySessionRegistryTest {
     void shouldRestoreExistingPersistentSession() {
         SessionOpenResult firstOpen = sessionRegistry.openSession(
                 "restored-client",
-                new SessionOpenRequest(false, true, null, "connection-1"));
+                new SessionOpenRequest(false, true, null, "connection-1", null));
         sessionRegistry.addSubscription("restored-client", "sensors/+/temperature", MqttQoS.AT_MOST_ONCE);
         sessionRegistry.onConnectionClosed("restored-client", "connection-1");
 
         SessionOpenResult secondOpen = sessionRegistry.openSession(
                 "restored-client",
-                new SessionOpenRequest(false, true, null, "connection-2"));
+                new SessionOpenRequest(false, true, null, "connection-2", null));
 
         assertTrue(secondOpen.sessionPresent());
         assertEquals("connection-2", secondOpen.session().connectionId());
@@ -72,7 +72,7 @@ class InMemorySessionRegistryTest {
     void shouldDeleteSessionImmediatelyWhenExpiryIsZero() {
         sessionRegistry.openSession(
                 "mqtt5-ephemeral",
-                new SessionOpenRequest(false, false, 0L, "connection-1"));
+                new SessionOpenRequest(false, false, 0L, "connection-1", null));
 
         sessionRegistry.onConnectionClosed("mqtt5-ephemeral", "connection-1");
 
@@ -84,7 +84,7 @@ class InMemorySessionRegistryTest {
     void shouldKeepOfflineSessionWhenExpiryIsPositive() {
         sessionRegistry.openSession(
                 "mqtt5-persistent",
-                new SessionOpenRequest(false, true, 30L, "connection-1"));
+                new SessionOpenRequest(false, true, 30L, "connection-1", null));
 
         sessionRegistry.onConnectionClosed("mqtt5-persistent", "connection-1");
 
@@ -100,7 +100,7 @@ class InMemorySessionRegistryTest {
     void shouldLazilyPurgeExpiredSessionOnLookup() {
         sessionRegistry.openSession(
                 "expired-client",
-                new SessionOpenRequest(false, true, 30L, "connection-1"));
+                new SessionOpenRequest(false, true, 30L, "connection-1", null));
 
         sessionRegistry.onConnectionClosed("expired-client", "connection-1");
         ClientSession session = sessionRegistry.find("expired-client").orElseThrow();
@@ -115,7 +115,7 @@ class InMemorySessionRegistryTest {
         sessionRegistry.configure(new TestBrokerRuntimeConfig(2));
         sessionRegistry.openSession(
                 "offline-client",
-                new SessionOpenRequest(false, true, null, "connection-1"));
+                new SessionOpenRequest(false, true, null, "connection-1", null));
 
         sessionRegistry.enqueueOfflineMessage("offline-client", new QueuedMessage(
                 "sensors/room-1/temperature",
@@ -147,7 +147,7 @@ class InMemorySessionRegistryTest {
     void shouldCreateAndAcknowledgeInflightDelivery() {
         sessionRegistry.openSession(
                 "inflight-client",
-                new SessionOpenRequest(false, true, null, "connection-1"));
+                new SessionOpenRequest(false, true, null, "connection-1", null));
 
         InflightMessage inflightMessage = sessionRegistry.createInflightMessage(
                         "inflight-client",
@@ -169,7 +169,7 @@ class InMemorySessionRegistryTest {
     void shouldRequeueInflightMessagesWhenPersistentConnectionCloses() {
         sessionRegistry.openSession(
                 "persistent-inflight",
-                new SessionOpenRequest(false, true, null, "connection-1"));
+                new SessionOpenRequest(false, true, null, "connection-1", null));
         sessionRegistry.createInflightMessage(
                 "persistent-inflight",
                 "sensors/room-1/temperature",

@@ -1,5 +1,6 @@
 package io.github.vxmqmqtt.vxmq.session;
 
+import io.github.vxmqmqtt.vxmq.protocol.model.WillMessage;
 import io.netty.handler.codec.mqtt.MqttQoS;
 import java.time.Instant;
 import java.util.ArrayDeque;
@@ -25,6 +26,7 @@ public final class ClientSession {
     private final Map<String, MqttQoS> subscriptions = new ConcurrentHashMap<>();
     private final Deque<QueuedMessage> queuedMessages = new ArrayDeque<>();
     private final Map<Integer, InflightMessage> inflightMessages = new LinkedHashMap<>();
+    private volatile WillMessage willMessage;
     private int nextPacketId = 1;
 
     public ClientSession(String clientId) {
@@ -67,13 +69,29 @@ public final class ClientSession {
     }
 
     /**
+     * Returns the currently stored will message, or {@code null} if this session has no active will.
+     */
+    public WillMessage willMessage() {
+        return willMessage == null ? null : new WillMessage(
+                willMessage.topicName(),
+                willMessage.payloadCopy(),
+                willMessage.qos(),
+                willMessage.retain());
+    }
+
+    /**
      * Activates the session for a live transport connection and applies the current connect-time policy.
      */
-    public void activate(String newConnectionId, boolean newPersistent, Long newSessionExpiryIntervalSeconds) {
+    public void activate(
+            String newConnectionId,
+            boolean newPersistent,
+            Long newSessionExpiryIntervalSeconds,
+            WillMessage newWillMessage) {
         this.connectionId = newConnectionId;
         this.persistent = newPersistent;
         this.sessionExpiryIntervalSeconds = newSessionExpiryIntervalSeconds;
         this.expiresAt = null;
+        this.willMessage = copyWillMessage(newWillMessage);
     }
 
     /**
@@ -218,6 +236,33 @@ public final class ClientSession {
      */
     public synchronized List<QueuedMessage> queuedMessages() {
         return new ArrayList<>(queuedMessages);
+    }
+
+    /**
+     * Clears and returns the current will message so it can be published only once.
+     */
+    public synchronized WillMessage takeWillMessage() {
+        WillMessage current = willMessage;
+        willMessage = null;
+        return copyWillMessage(current);
+    }
+
+    /**
+     * Clears the current will message without returning it.
+     */
+    public synchronized void clearWillMessage() {
+        willMessage = null;
+    }
+
+    private WillMessage copyWillMessage(WillMessage source) {
+        if (source == null) {
+            return null;
+        }
+        return new WillMessage(
+                source.topicName(),
+                source.payloadCopy(),
+                source.qos(),
+                source.retain());
     }
 
     private int allocatePacketId() {

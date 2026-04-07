@@ -13,6 +13,7 @@ import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionItem;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.WillMessage;
 import io.github.vxmqmqtt.vxmq.transport.BrokerTransport;
 import io.github.vxmqmqtt.vxmq.transport.ClientConnection;
 import io.github.vxmqmqtt.vxmq.transport.ClientConnectionRegistry;
@@ -20,6 +21,7 @@ import io.netty.handler.codec.mqtt.MqttProperties;
 import io.smallrye.mutiny.Uni;
 import io.vertx.mqtt.messages.codes.MqttDisconnectReasonCode;
 import io.vertx.mqtt.MqttAuth;
+import io.vertx.mqtt.MqttWill;
 import io.vertx.mqtt.MqttServerOptions;
 import io.vertx.mutiny.core.buffer.Buffer;
 import io.vertx.mutiny.core.Vertx;
@@ -181,9 +183,9 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
         endpoint.disconnectHandler(() -> protocolEngine.handleDisconnect(connection));
         endpoint.publishAcknowledgeHandler(packetId -> protocolEngine.handlePubAck(connection, packetId));
         endpoint.closeHandler(() -> {
-            protocolEngine.handleConnectionClosed(connection);
             endpointsByConnectionId.remove(connection.connectionId());
             connectionRegistry.close(connection.connectionId());
+            protocolEngine.handleConnectionClosed(connection).forEach(this::sendPublishToSubscriber);
         });
     }
 
@@ -194,7 +196,8 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                     endpoint.protocolName(),
                     endpoint.isCleanSession(),
                     username(endpoint.auth()),
-                    passwordPresent(endpoint.auth()));
+                    passwordPresent(endpoint.auth()),
+                    willMessage(endpoint.will()));
         }
         if (endpoint.protocolVersion() == 5) {
             return ConnectRequest.mqtt5(
@@ -203,7 +206,8 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                     endpoint.isCleanSession(),
                     sessionExpiryIntervalSeconds(endpoint.connectProperties()),
                     username(endpoint.auth()),
-                    passwordPresent(endpoint.auth()));
+                    passwordPresent(endpoint.auth()),
+                    willMessage(endpoint.will()));
         }
 
         return new ConnectRequest(
@@ -214,7 +218,8 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                 null,
                 null,
                 username(endpoint.auth()),
-                passwordPresent(endpoint.auth()));
+                passwordPresent(endpoint.auth()),
+                willMessage(endpoint.will()));
     }
 
     private void closeSupersededConnection(String connectionId) {
@@ -312,6 +317,19 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
             return 0L;
         }
         return ((Number) property.value()).longValue();
+    }
+
+    private WillMessage willMessage(MqttWill will) {
+        if (will == null || !will.isWillFlag()) {
+            return null;
+        }
+        return new WillMessage(
+                will.getWillTopic(),
+                will.getWillMessageBytes() == null ? null : will.getWillMessageBytes().clone(),
+                will.getWillQos() <= 0
+                        ? io.netty.handler.codec.mqtt.MqttQoS.AT_MOST_ONCE
+                        : io.netty.handler.codec.mqtt.MqttQoS.AT_LEAST_ONCE,
+                will.isWillRetain());
     }
 
     /**
