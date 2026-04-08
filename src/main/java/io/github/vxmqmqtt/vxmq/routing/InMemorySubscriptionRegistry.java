@@ -4,9 +4,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * In-memory subscription index used by the single-node milestone.
@@ -14,7 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @ApplicationScoped
 public class InMemorySubscriptionRegistry implements SubscriptionRegistry {
 
-    private final Map<String, Set<SubscriptionBinding>> subscriptionsByFilter = new ConcurrentHashMap<>();
+    private final SubscriptionTreeNode root = new SubscriptionTreeNode();
     private final TopicMatcher topicMatcher;
 
     public InMemorySubscriptionRegistry(TopicMatcher topicMatcher) {
@@ -23,42 +22,119 @@ public class InMemorySubscriptionRegistry implements SubscriptionRegistry {
 
     @Override
     public void addSubscription(SubscriptionBinding subscriptionBinding) {
-        // Keep only one binding per client and filter so later subscriptions replace earlier ones.
-        subscriptionsByFilter
-                .computeIfAbsent(subscriptionBinding.topicFilter(), ignored -> ConcurrentHashMap.newKeySet())
-                .removeIf(binding -> binding.clientId().equals(subscriptionBinding.clientId()));
-        subscriptionsByFilter
-                .computeIfAbsent(subscriptionBinding.topicFilter(), ignored -> ConcurrentHashMap.newKeySet())
-                .add(subscriptionBinding);
+        if (!topicMatcher.isValidFilter(subscriptionBinding.topicFilter())) {
+            throw new IllegalArgumentException("Invalid topic filter: " + subscriptionBinding.topicFilter());
+        }
+
+        String[] levels = levels(subscriptionBinding.topicFilter());
+        SubscriptionTreeNode current = root;
+        for (int index = 0; index < levels.length; index++) {
+            String level = levels[index];
+            if ("#".equals(level)) {
+                current.multiLevelWildcardBindings().put(subscriptionBinding.clientId(), subscriptionBinding);
+                return;
+            }
+            current = "+".equals(level)
+                    ? current.ensureSingleLevelWildcardChild()
+                    : current.exactChildren().computeIfAbsent(level, ignored -> new SubscriptionTreeNode());
+        }
+        current.terminalBindings().put(subscriptionBinding.clientId(), subscriptionBinding);
     }
 
     @Override
     public boolean removeSubscription(String clientId, String topicFilter) {
-        Set<SubscriptionBinding> bindings = subscriptionsByFilter.get(topicFilter);
-        if (bindings == null) {
+        if (!topicMatcher.isValidFilter(topicFilter)) {
             return false;
         }
 
-        boolean removed = bindings.removeIf(binding -> binding.clientId().equals(clientId));
-        if (bindings.isEmpty()) {
-            subscriptionsByFilter.remove(topicFilter);
-        }
-        return removed;
+        return remove(root, levels(topicFilter), 0, clientId);
     }
 
     @Override
     public Collection<SubscriptionBinding> match(String topicName) {
-        Map<String, SubscriptionBinding> deduplicated = new LinkedHashMap<>();
-        for (Map.Entry<String, Set<SubscriptionBinding>> entry : subscriptionsByFilter.entrySet()) {
-            if (!topicMatcher.matches(entry.getKey(), topicName)) {
-                continue;
-            }
-            for (SubscriptionBinding binding : entry.getValue()) {
-                // When overlapping filters match the same client, keep a single delivery target.
-                deduplicated.merge(binding.clientId(), binding, (left, right) ->
-                        left.grantedQos().value() >= right.grantedQos().value() ? left : right);
-            }
+        if (!topicMatcher.isValidTopicName(topicName)) {
+            return List.of();
         }
+
+        Map<String, SubscriptionBinding> deduplicated = new LinkedHashMap<>();
+        match(root, levels(topicName), 0, deduplicated);
         return new ArrayList<>(deduplicated.values());
+    }
+
+    /**
+     * Exposes the current tree node count for pruning-oriented tests.
+     */
+    int nodeCount() {
+        return root.nodeCount();
+    }
+
+    private void match(
+            SubscriptionTreeNode node,
+            String[] topicLevels,
+            int levelIndex,
+            Map<String, SubscriptionBinding> deduplicated) {
+        mergeBindings(node.multiLevelWildcardBindings(), deduplicated);
+        if (levelIndex == topicLevels.length) {
+            mergeBindings(node.terminalBindings(), deduplicated);
+            return;
+        }
+
+        SubscriptionTreeNode exactChild = node.exactChildren().get(topicLevels[levelIndex]);
+        if (exactChild != null) {
+            match(exactChild, topicLevels, levelIndex + 1, deduplicated);
+        }
+        if (node.singleLevelWildcardChild() != null) {
+            match(node.singleLevelWildcardChild(), topicLevels, levelIndex + 1, deduplicated);
+        }
+    }
+
+    private void mergeBindings(
+            Map<String, SubscriptionBinding> bindings,
+            Map<String, SubscriptionBinding> deduplicated) {
+        for (SubscriptionBinding binding : bindings.values()) {
+            deduplicated.merge(binding.clientId(), binding, (left, right) ->
+                    left.grantedQos().value() >= right.grantedQos().value() ? left : right);
+        }
+    }
+
+    private boolean remove(
+            SubscriptionTreeNode node,
+            String[] filterLevels,
+            int levelIndex,
+            String clientId) {
+        boolean removed;
+        if (levelIndex == filterLevels.length) {
+            removed = node.terminalBindings().remove(clientId) != null;
+            return removed;
+        }
+
+        String level = filterLevels[levelIndex];
+        if ("#".equals(level)) {
+            removed = node.multiLevelWildcardBindings().remove(clientId) != null;
+            return removed;
+        }
+
+        SubscriptionTreeNode child = "+".equals(level)
+                ? node.singleLevelWildcardChild()
+                : node.exactChildren().get(level);
+        if (child == null) {
+            return false;
+        }
+
+        removed = remove(child, filterLevels, levelIndex + 1, clientId);
+        if (!removed) {
+            return false;
+        }
+
+        if ("+".equals(level)) {
+            node.clearSingleLevelWildcardChildIfUnused();
+        } else if (child.isEmpty()) {
+            node.exactChildren().remove(level);
+        }
+        return true;
+    }
+
+    private String[] levels(String topic) {
+        return topic.split("/", -1);
     }
 }

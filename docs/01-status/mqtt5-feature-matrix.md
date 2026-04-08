@@ -24,7 +24,7 @@
 | 发布订阅 | UNSUBSCRIBE / UNSUBACK | M1 | 支持 | 支持 | 已验证 | 已覆盖 MQTT 5 reason code |
 | 发布订阅 | PUBLISH QoS 0 主链路 | M1 | 支持 | 支持 | 已验证 | 已具备最小端到端闭环 |
 | 发布订阅 | Topic Filter / Wildcard | M1 | 支持 | 支持 | 已验证 | 已支持 `+` 与 `#` |
-| 内部机制 | 订阅树 / 路由索引重构 | M2 | 不适用 | 不适用 | 未开始 | 这是少量例外的内部基础设施项，用于支撑后续订阅匹配与高级订阅能力 |
+| 内部机制 | 订阅树 / 路由索引重构 | M2 | 不适用 | 不适用 | 已验证 | 已采用订阅树替换线性扫描索引，并补充基准对比 harness |
 | 发布订阅 | Subscription Options | M3 | 不适用 | 不支持 | 未开始 | 包括 `No Local`、`Retain As Published`、`Retain Handling` |
 | 发布订阅 | Subscription Identifier | M3 | 不适用 | 不支持 | 未开始 | MQTT 5 订阅标识 |
 | 发布订阅 | Shared Subscription | M5 | 不适用 | 不支持 | 未开始 | 高级分发能力 |

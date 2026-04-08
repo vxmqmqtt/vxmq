@@ -55,13 +55,13 @@ Topic Filter 与 Topic Name 各层级完全相同则匹配。
 
 ## 当前数据结构
 
-当前实现采用内存态订阅索引，优先保证语义正确与代码清晰。
+当前实现采用内存态订阅树索引：
 
 - `session` 视图回答“某个 clientId 订阅了什么”
 - `routing` 视图回答“某个 Topic Name 命中了谁”
 - 订阅状态的真相在 `session`，`routing` 只是为匹配和投递服务的派生索引
 
-这种双视图设计允许订阅更新和消息查找分别按最自然的方向组织。
+当前订阅树模型见 [`subscription-tree-model.md`](subscription-tree-model.md)。
 
 ## 更新与查询规则
 
@@ -87,14 +87,14 @@ Topic Filter 与 Topic Name 各层级完全相同则匹配。
 
 ## 当前实现说明
 
-- 当前实现采用内存态订阅索引，优先保证语义正确与代码清晰。
+- 当前实现采用内存态订阅树索引，匹配复杂度不再依赖“扫描所有 filter”。
 - 会话删除时必须同步清理路由索引，避免派生索引残留导致消息被错误投递。
 - 同一客户端的重叠订阅在当前实现中只投递一次，相关决策见 [`../07-project/decisions/0003-m1-overlapping-subscription-delivery.md`](../07-project/decisions/0003-m1-overlapping-subscription-delivery.md)。
 - Shared Subscription 仍未进入当前实现范围，因此路由结果当前不携带共享组语义。
+- 当前并发模型按 Event Loop 优先处理，不承诺并发读写安全。
 
 ## 演进方向
 
-- 订阅树已纳入后续任务规划，预计作为 `M2` 的路由层基础设施项推进；当前只确认要做，不提前展开具体设计。
-- 若后续 Topic Filter 数量增长，索引结构可从当前实现演进为更高效的树形结构。
 - 若后续引入 Shared Subscription，路由结果需要显式携带共享组信息。
 - 若后续引入 Retained Message，路由层仍只负责匹配，不直接负责保留消息存储。
+- 若后续需要并发读写安全，可在不推翻树模型的前提下再讨论同步策略。
