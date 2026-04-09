@@ -91,10 +91,11 @@ Topic Filter 与 Topic Name 各层级完全相同则匹配。
 - 会话删除时必须同步清理路由索引，避免派生索引残留导致消息被错误投递。
 - 同一客户端的重叠订阅在当前实现中只投递一次，相关决策见 [`../07-project/decisions/0003-m1-overlapping-subscription-delivery.md`](../07-project/decisions/0003-m1-overlapping-subscription-delivery.md)。
 - Shared Subscription 仍未进入当前实现范围，因此路由结果当前不携带共享组语义。
-- 当前并发模型按 Event Loop 优先处理，不承诺并发读写安全。
+- 当前主线订阅树仍未完成并发读写安全加固。
+- 并发安全策略的原型评估已完成，相关结论见 [`../07-project/decisions/0006-routing-concurrency-strategy.md`](../07-project/decisions/0006-routing-concurrency-strategy.md)。
 
 ## 演进方向
 
 - 若后续引入 Shared Subscription，路由结果需要显式携带共享组信息。
 - 若后续引入 Retained Message，路由层仍只负责匹配，不直接负责保留消息存储。
-- 若后续需要并发读写安全，可在不推翻树模型的前提下再讨论同步策略。
+- 并发读写安全的下一步默认方向是 `snapshot / copy-on-write`，而不是将 routing 直接收敛为 single-owner Verticle。
