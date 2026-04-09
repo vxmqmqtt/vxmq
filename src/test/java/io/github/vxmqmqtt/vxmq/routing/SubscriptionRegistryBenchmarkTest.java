@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
  */
 class SubscriptionRegistryBenchmarkTest {
 
-    private final DefaultTopicMatcher topicMatcher = new DefaultTopicMatcher();
+    private final DefaultMqttTopicSupport mqttTopicSupport = new DefaultMqttTopicSupport();
 
     // Verifies that the subscription tree returns the same matches as the linear baseline across representative workloads.
     @Test
@@ -55,25 +55,25 @@ class SubscriptionRegistryBenchmarkTest {
     }
 
     private Collection<SubscriptionBinding> baselineMatches(Scenario scenario) {
-        LinearScanSubscriptionRegistry registry = new LinearScanSubscriptionRegistry(topicMatcher);
+        LinearScanSubscriptionRegistry registry = new LinearScanSubscriptionRegistry(mqttTopicSupport);
         scenario.bindings().forEach(registry::addSubscription);
         return registry.match(scenario.topicName());
     }
 
     private Collection<SubscriptionBinding> treeMatches(Scenario scenario) {
-        InMemorySubscriptionRegistry registry = new InMemorySubscriptionRegistry(topicMatcher);
+        InMemorySubscriptionRegistry registry = new InMemorySubscriptionRegistry(mqttTopicSupport);
         scenario.bindings().forEach(registry::addSubscription);
         return registry.match(scenario.topicName());
     }
 
     private long measureBaseline(Scenario scenario) {
-        LinearScanSubscriptionRegistry registry = new LinearScanSubscriptionRegistry(topicMatcher);
+        LinearScanSubscriptionRegistry registry = new LinearScanSubscriptionRegistry(mqttTopicSupport);
         scenario.bindings().forEach(registry::addSubscription);
         return measure(() -> registry.match(scenario.topicName()));
     }
 
     private long measureTree(Scenario scenario) {
-        InMemorySubscriptionRegistry registry = new InMemorySubscriptionRegistry(topicMatcher);
+        InMemorySubscriptionRegistry registry = new InMemorySubscriptionRegistry(mqttTopicSupport);
         scenario.bindings().forEach(registry::addSubscription);
         return measure(() -> registry.match(scenario.topicName()));
     }

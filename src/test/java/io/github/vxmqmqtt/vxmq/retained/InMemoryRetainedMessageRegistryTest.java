@@ -4,7 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.github.vxmqmqtt.vxmq.routing.DefaultTopicMatcher;
+import io.github.vxmqmqtt.vxmq.routing.DefaultMqttTopicSupport;
 import io.netty.handler.codec.mqtt.MqttQoS;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,7 +18,7 @@ class InMemoryRetainedMessageRegistryTest {
 
     @BeforeEach
     void setUp() {
-        retainedMessageRegistry = new InMemoryRetainedMessageRegistry(new DefaultTopicMatcher());
+        retainedMessageRegistry = new InMemoryRetainedMessageRegistry(new DefaultMqttTopicSupport());
     }
 
     // Verifies that storing a retained message makes it queryable by exact topic name.

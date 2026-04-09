@@ -10,7 +10,7 @@ import io.github.vxmqmqtt.vxmq.config.BrokerRuntimeConfig;
 import io.github.vxmqmqtt.vxmq.observability.BrokerEventSink;
 import io.github.vxmqmqtt.vxmq.protocol.DefaultProtocolEngine;
 import io.github.vxmqmqtt.vxmq.retained.InMemoryRetainedMessageRegistry;
-import io.github.vxmqmqtt.vxmq.routing.DefaultTopicMatcher;
+import io.github.vxmqmqtt.vxmq.routing.DefaultMqttTopicSupport;
 import io.github.vxmqmqtt.vxmq.routing.InMemorySubscriptionRegistry;
 import io.github.vxmqmqtt.vxmq.session.InMemorySessionRegistry;
 import io.github.vxmqmqtt.vxmq.transport.ClientConnection;
@@ -525,7 +525,7 @@ class VertxMqttBrokerTransportIntegrationTest {
 
     private int startBroker(int offlineQueueCapacityPerSession) {
         vertx = Vertx.vertx();
-        DefaultTopicMatcher topicMatcher = new DefaultTopicMatcher();
+        DefaultMqttTopicSupport mqttTopicSupport = new DefaultMqttTopicSupport();
         ClientConnectionRegistry connectionRegistry = new ClientConnectionRegistry();
         transport = new VertxMqttBrokerTransport(
                 vertx,
@@ -533,9 +533,9 @@ class VertxMqttBrokerTransportIntegrationTest {
                 new DefaultProtocolEngine(
                         new PermitAllAuthProvider(),
                         new InMemorySessionRegistry(offlineQueueCapacityPerSession),
-                        new InMemoryRetainedMessageRegistry(topicMatcher),
-                        new InMemorySubscriptionRegistry(topicMatcher),
-                        topicMatcher,
+                        new InMemoryRetainedMessageRegistry(mqttTopicSupport),
+                        new InMemorySubscriptionRegistry(mqttTopicSupport),
+                        mqttTopicSupport,
                         new NoOpBrokerEventSink(),
                         connectionRegistry),
                 connectionRegistry,

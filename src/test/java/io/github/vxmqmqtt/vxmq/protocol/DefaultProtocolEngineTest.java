@@ -21,7 +21,7 @@ import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.WillMessage;
 import io.github.vxmqmqtt.vxmq.retained.InMemoryRetainedMessageRegistry;
 import io.github.vxmqmqtt.vxmq.retained.RetainedMessageRegistry;
-import io.github.vxmqmqtt.vxmq.routing.DefaultTopicMatcher;
+import io.github.vxmqmqtt.vxmq.routing.DefaultMqttTopicSupport;
 import io.github.vxmqmqtt.vxmq.routing.InMemorySubscriptionRegistry;
 import io.github.vxmqmqtt.vxmq.routing.SubscriptionRegistry;
 import io.github.vxmqmqtt.vxmq.session.InMemorySessionRegistry;
@@ -53,17 +53,17 @@ class DefaultProtocolEngineTest {
 
     @BeforeEach
     void setUp() {
-        DefaultTopicMatcher topicMatcher = new DefaultTopicMatcher();
+        DefaultMqttTopicSupport mqttTopicSupport = new DefaultMqttTopicSupport();
         connectionRegistry = new ClientConnectionRegistry();
         sessionRegistry = new InMemorySessionRegistry();
-        retainedMessageRegistry = new InMemoryRetainedMessageRegistry(topicMatcher);
-        subscriptionRegistry = new InMemorySubscriptionRegistry(topicMatcher);
+        retainedMessageRegistry = new InMemoryRetainedMessageRegistry(mqttTopicSupport);
+        subscriptionRegistry = new InMemorySubscriptionRegistry(mqttTopicSupport);
         protocolEngine = new DefaultProtocolEngine(
                 new PermitAllAuthProvider(),
                 sessionRegistry,
                 retainedMessageRegistry,
                 subscriptionRegistry,
-                topicMatcher,
+                mqttTopicSupport,
                 new NoOpBrokerEventSink(),
                 connectionRegistry);
     }

@@ -13,10 +13,10 @@ import java.util.concurrent.ConcurrentHashMap;
 final class LinearScanSubscriptionRegistry implements SubscriptionRegistry {
 
     private final Map<String, Set<SubscriptionBinding>> subscriptionsByFilter = new ConcurrentHashMap<>();
-    private final TopicMatcher topicMatcher;
+    private final MqttTopicSupport mqttTopicSupport;
 
-    LinearScanSubscriptionRegistry(TopicMatcher topicMatcher) {
-        this.topicMatcher = topicMatcher;
+    LinearScanSubscriptionRegistry(MqttTopicSupport mqttTopicSupport) {
+        this.mqttTopicSupport = mqttTopicSupport;
     }
 
     @Override
@@ -46,7 +46,7 @@ final class LinearScanSubscriptionRegistry implements SubscriptionRegistry {
     public Collection<SubscriptionBinding> match(String topicName) {
         Map<String, SubscriptionBinding> deduplicated = new LinkedHashMap<>();
         for (Map.Entry<String, Set<SubscriptionBinding>> entry : subscriptionsByFilter.entrySet()) {
-            if (!topicMatcher.matches(entry.getKey(), topicName)) {
+            if (!mqttTopicSupport.matches(entry.getKey(), topicName)) {
                 continue;
             }
             for (SubscriptionBinding binding : entry.getValue()) {

@@ -1,6 +1,6 @@
 package io.github.vxmqmqtt.vxmq.retained;
 
-import io.github.vxmqmqtt.vxmq.routing.TopicMatcher;
+import io.github.vxmqmqtt.vxmq.routing.MqttTopicSupport;
 import io.netty.handler.codec.mqtt.MqttQoS;
 import jakarta.enterprise.context.ApplicationScoped;
 import java.util.Comparator;
@@ -16,10 +16,10 @@ import java.util.concurrent.ConcurrentHashMap;
 public class InMemoryRetainedMessageRegistry implements RetainedMessageRegistry {
 
     private final Map<String, RetainedMessage> retainedMessagesByTopic = new ConcurrentHashMap<>();
-    private final TopicMatcher topicMatcher;
+    private final MqttTopicSupport mqttTopicSupport;
 
-    public InMemoryRetainedMessageRegistry(TopicMatcher topicMatcher) {
-        this.topicMatcher = topicMatcher;
+    public InMemoryRetainedMessageRegistry(MqttTopicSupport mqttTopicSupport) {
+        this.mqttTopicSupport = mqttTopicSupport;
     }
 
     @Override
@@ -40,7 +40,7 @@ public class InMemoryRetainedMessageRegistry implements RetainedMessageRegistry 
     public List<RetainedMessage> findMatching(String topicFilter) {
         return retainedMessagesByTopic.entrySet()
                 .stream()
-                .filter(entry -> topicMatcher.matches(topicFilter, entry.getKey()))
+                .filter(entry -> mqttTopicSupport.matches(topicFilter, entry.getKey()))
                 .sorted(Map.Entry.comparingByKey(Comparator.naturalOrder()))
                 .map(Map.Entry::getValue)
                 .map(retainedMessage -> new RetainedMessage(

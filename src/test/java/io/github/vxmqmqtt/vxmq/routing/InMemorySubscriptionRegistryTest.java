@@ -14,12 +14,12 @@ import org.junit.jupiter.api.Test;
  */
 class InMemorySubscriptionRegistryTest {
 
-    private final DefaultTopicMatcher topicMatcher = new DefaultTopicMatcher();
+    private final DefaultMqttTopicSupport mqttTopicSupport = new DefaultMqttTopicSupport();
 
     // Verifies that exact, single-level wildcard, and multi-level wildcard subscriptions can all be matched together.
     @Test
     void shouldMatchExactAndWildcardSubscriptions() {
-        InMemorySubscriptionRegistry registry = new InMemorySubscriptionRegistry(topicMatcher);
+        InMemorySubscriptionRegistry registry = new InMemorySubscriptionRegistry(mqttTopicSupport);
         registry.addSubscription(new SubscriptionBinding("client-exact", "sensors/room-1/temperature", MqttQoS.AT_MOST_ONCE));
         registry.addSubscription(new SubscriptionBinding("client-plus", "sensors/+/temperature", MqttQoS.AT_LEAST_ONCE));
         registry.addSubscription(new SubscriptionBinding("client-hash", "sensors/#", MqttQoS.AT_MOST_ONCE));
@@ -33,7 +33,7 @@ class InMemorySubscriptionRegistryTest {
     // Verifies that overlapping subscriptions for the same client are deduplicated and the highest granted QoS wins.
     @Test
     void shouldDeduplicateOverlappingSubscriptionsByClientAndHighestQos() {
-        InMemorySubscriptionRegistry registry = new InMemorySubscriptionRegistry(topicMatcher);
+        InMemorySubscriptionRegistry registry = new InMemorySubscriptionRegistry(mqttTopicSupport);
         registry.addSubscription(new SubscriptionBinding("client-a", "sensors/#", MqttQoS.AT_MOST_ONCE));
         registry.addSubscription(new SubscriptionBinding("client-a", "sensors/+/temperature", MqttQoS.AT_LEAST_ONCE));
         registry.addSubscription(new SubscriptionBinding("client-b", "sensors/+/temperature", MqttQoS.AT_MOST_ONCE));
@@ -52,7 +52,7 @@ class InMemorySubscriptionRegistryTest {
     // Verifies that removing the last binding on a path prunes now-unused tree nodes.
     @Test
     void shouldPruneUnusedTreeNodesAfterRemovingLastBinding() {
-        InMemorySubscriptionRegistry registry = new InMemorySubscriptionRegistry(topicMatcher);
+        InMemorySubscriptionRegistry registry = new InMemorySubscriptionRegistry(mqttTopicSupport);
         registry.addSubscription(new SubscriptionBinding("client-a", "sensors/room-1/temperature", MqttQoS.AT_MOST_ONCE));
 
         int nodeCountAfterInsert = registry.nodeCount();
@@ -67,7 +67,7 @@ class InMemorySubscriptionRegistryTest {
     // Verifies that multi-level wildcard bindings attached to an intermediate node still match deeper topics.
     @Test
     void shouldMatchHashBindingsStoredAtIntermediateNodes() {
-        InMemorySubscriptionRegistry registry = new InMemorySubscriptionRegistry(topicMatcher);
+        InMemorySubscriptionRegistry registry = new InMemorySubscriptionRegistry(mqttTopicSupport);
         registry.addSubscription(new SubscriptionBinding("client-a", "sensors/room-1/#", MqttQoS.AT_MOST_ONCE));
         registry.addSubscription(new SubscriptionBinding("client-b", "sensors/room-1/temperature", MqttQoS.AT_MOST_ONCE));
 

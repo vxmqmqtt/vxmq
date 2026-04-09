@@ -1,8 +1,8 @@
 package io.github.vxmqmqtt.vxmq.routing.eval;
 
-import io.github.vxmqmqtt.vxmq.routing.DefaultTopicMatcher;
+import io.github.vxmqmqtt.vxmq.routing.DefaultMqttTopicSupport;
 import io.github.vxmqmqtt.vxmq.routing.SubscriptionBinding;
-import io.github.vxmqmqtt.vxmq.routing.TopicMatcher;
+import io.github.vxmqmqtt.vxmq.routing.MqttTopicSupport;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 final class SnapshotTreeRoutingCandidate implements RoutingRegistryCandidate {
 
-    private final TopicMatcher topicMatcher = new DefaultTopicMatcher();
+    private final MqttTopicSupport mqttTopicSupport = new DefaultMqttTopicSupport();
     private final AtomicReference<ImmutableNode> root = new AtomicReference<>(ImmutableNode.empty());
 
     @Override
@@ -25,7 +25,7 @@ final class SnapshotTreeRoutingCandidate implements RoutingRegistryCandidate {
 
     @Override
     public void addSubscription(SubscriptionBinding binding) {
-        if (!topicMatcher.isValidFilter(binding.topicFilter())) {
+        if (!mqttTopicSupport.isValidFilter(binding.topicFilter())) {
             throw new IllegalArgumentException("Invalid topic filter: " + binding.topicFilter());
         }
 
@@ -41,7 +41,7 @@ final class SnapshotTreeRoutingCandidate implements RoutingRegistryCandidate {
 
     @Override
     public boolean removeSubscription(String clientId, String topicFilter) {
-        if (!topicMatcher.isValidFilter(topicFilter)) {
+        if (!mqttTopicSupport.isValidFilter(topicFilter)) {
             return false;
         }
 
@@ -60,7 +60,7 @@ final class SnapshotTreeRoutingCandidate implements RoutingRegistryCandidate {
 
     @Override
     public Collection<SubscriptionBinding> match(String topicName) {
-        if (!topicMatcher.isValidTopicName(topicName)) {
+        if (!mqttTopicSupport.isValidTopicName(topicName)) {
             return List.of();
         }
 

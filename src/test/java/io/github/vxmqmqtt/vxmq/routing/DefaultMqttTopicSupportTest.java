@@ -8,9 +8,9 @@ import org.junit.jupiter.api.Test;
 /**
  * Verifies the minimal topic matching rules used by the in-memory router.
  */
-class DefaultTopicMatcherTest {
+class DefaultMqttTopicSupportTest {
 
-    private final DefaultTopicMatcher matcher = new DefaultTopicMatcher();
+    private final DefaultMqttTopicSupport matcher = new DefaultMqttTopicSupport();
 
     // Verifies that '+' and '#' follow the expected MQTT wildcard matching behavior.
     @Test

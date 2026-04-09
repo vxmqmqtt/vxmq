@@ -2,7 +2,7 @@ package io.github.vxmqmqtt.vxmq.routing.eval;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import io.github.vxmqmqtt.vxmq.routing.DefaultTopicMatcher;
+import io.github.vxmqmqtt.vxmq.routing.DefaultMqttTopicSupport;
 import io.github.vxmqmqtt.vxmq.routing.InMemorySubscriptionRegistry;
 import io.github.vxmqmqtt.vxmq.routing.SubscriptionBinding;
 import io.netty.handler.codec.mqtt.MqttQoS;
@@ -22,7 +22,7 @@ import org.junit.jupiter.api.Test;
  */
 class RoutingRegistryBenchmarkComparisonTest {
 
-    private final DefaultTopicMatcher topicMatcher = new DefaultTopicMatcher();
+    private final DefaultMqttTopicSupport mqttTopicSupport = new DefaultMqttTopicSupport();
 
     // Verifies that every candidate returns the same match set as the current single-thread tree before timing comparisons are printed.
     @Test
@@ -128,27 +128,27 @@ class RoutingRegistryBenchmarkComparisonTest {
     }
 
     private Collection<SubscriptionBinding> baselineMatches(Scenario scenario) {
-        InMemorySubscriptionRegistry registry = new InMemorySubscriptionRegistry(topicMatcher);
+        InMemorySubscriptionRegistry registry = new InMemorySubscriptionRegistry(mqttTopicSupport);
         scenario.bindings().forEach(registry::addSubscription);
         return registry.match(scenario.topicName());
     }
 
     private long measureUnsafeTree(Scenario scenario) {
-        InMemorySubscriptionRegistry registry = new InMemorySubscriptionRegistry(topicMatcher);
+        InMemorySubscriptionRegistry registry = new InMemorySubscriptionRegistry(mqttTopicSupport);
         scenario.bindings().forEach(registry::addSubscription);
         return measure(() -> registry.match(scenario.topicName()));
     }
 
     private long measureUnsafeLoad(List<SubscriptionBinding> bindings) {
         return measureRepeated(20, () -> {
-            InMemorySubscriptionRegistry registry = new InMemorySubscriptionRegistry(topicMatcher);
+            InMemorySubscriptionRegistry registry = new InMemorySubscriptionRegistry(mqttTopicSupport);
             bindings.forEach(registry::addSubscription);
         });
     }
 
     private long measureUnsafeUnload(List<SubscriptionBinding> bindings) {
         return measureRepeated(20, () -> {
-            InMemorySubscriptionRegistry registry = new InMemorySubscriptionRegistry(topicMatcher);
+            InMemorySubscriptionRegistry registry = new InMemorySubscriptionRegistry(mqttTopicSupport);
             bindings.forEach(registry::addSubscription);
             bindings.forEach(binding -> registry.removeSubscription(binding.clientId(), binding.topicFilter()));
         });

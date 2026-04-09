@@ -14,15 +14,15 @@ import java.util.Map;
 public class InMemorySubscriptionRegistry implements SubscriptionRegistry {
 
     private final SubscriptionTreeNode root = new SubscriptionTreeNode();
-    private final TopicMatcher topicMatcher;
+    private final MqttTopicSupport mqttTopicSupport;
 
-    public InMemorySubscriptionRegistry(TopicMatcher topicMatcher) {
-        this.topicMatcher = topicMatcher;
+    public InMemorySubscriptionRegistry(MqttTopicSupport mqttTopicSupport) {
+        this.mqttTopicSupport = mqttTopicSupport;
     }
 
     @Override
     public void addSubscription(SubscriptionBinding subscriptionBinding) {
-        if (!topicMatcher.isValidFilter(subscriptionBinding.topicFilter())) {
+        if (!mqttTopicSupport.isValidFilter(subscriptionBinding.topicFilter())) {
             throw new IllegalArgumentException("Invalid topic filter: " + subscriptionBinding.topicFilter());
         }
 
@@ -43,7 +43,7 @@ public class InMemorySubscriptionRegistry implements SubscriptionRegistry {
 
     @Override
     public boolean removeSubscription(String clientId, String topicFilter) {
-        if (!topicMatcher.isValidFilter(topicFilter)) {
+        if (!mqttTopicSupport.isValidFilter(topicFilter)) {
             return false;
         }
 
@@ -52,7 +52,7 @@ public class InMemorySubscriptionRegistry implements SubscriptionRegistry {
 
     @Override
     public Collection<SubscriptionBinding> match(String topicName) {
-        if (!topicMatcher.isValidTopicName(topicName)) {
+        if (!mqttTopicSupport.isValidTopicName(topicName)) {
             return List.of();
         }
 

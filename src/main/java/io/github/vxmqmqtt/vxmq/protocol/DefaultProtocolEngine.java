@@ -19,7 +19,7 @@ import io.github.vxmqmqtt.vxmq.retained.RetainedMessage;
 import io.github.vxmqmqtt.vxmq.retained.RetainedMessageRegistry;
 import io.github.vxmqmqtt.vxmq.routing.SubscriptionBinding;
 import io.github.vxmqmqtt.vxmq.routing.SubscriptionRegistry;
-import io.github.vxmqmqtt.vxmq.routing.TopicMatcher;
+import io.github.vxmqmqtt.vxmq.routing.MqttTopicSupport;
 import io.github.vxmqmqtt.vxmq.session.ClientSession;
 import io.github.vxmqmqtt.vxmq.session.InflightMessage;
 import io.github.vxmqmqtt.vxmq.session.QueuedMessage;
@@ -51,7 +51,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     private final SessionRegistry sessionRegistry;
     private final RetainedMessageRegistry retainedMessageRegistry;
     private final SubscriptionRegistry subscriptionRegistry;
-    private final TopicMatcher topicMatcher;
+    private final MqttTopicSupport mqttTopicSupport;
     private final BrokerEventSink brokerEventSink;
     private final ClientConnectionRegistry connectionRegistry;
 
@@ -60,14 +60,14 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             SessionRegistry sessionRegistry,
             RetainedMessageRegistry retainedMessageRegistry,
             SubscriptionRegistry subscriptionRegistry,
-            TopicMatcher topicMatcher,
+            MqttTopicSupport mqttTopicSupport,
             BrokerEventSink brokerEventSink,
             ClientConnectionRegistry connectionRegistry) {
         this.authProvider = authProvider;
         this.sessionRegistry = sessionRegistry;
         this.retainedMessageRegistry = retainedMessageRegistry;
         this.subscriptionRegistry = subscriptionRegistry;
-        this.topicMatcher = topicMatcher;
+        this.mqttTopicSupport = mqttTopicSupport;
         this.brokerEventSink = brokerEventSink;
         this.connectionRegistry = connectionRegistry;
     }
@@ -116,7 +116,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         List<PublishDelivery> retainedDeliveries = new ArrayList<>();
         for (SubscriptionItem item : request.items()) {
             String topicFilter = item.topicFilter();
-            if (!topicMatcher.isValidFilter(topicFilter)) {
+            if (!mqttTopicSupport.isValidFilter(topicFilter)) {
                 brokerEventSink.protocolWarning(connection, "Rejected invalid topic filter: " + topicFilter);
                 results.add(SubscriptionItemResult.rejected(topicFilter, MqttSubAckReasonCode.TOPIC_FILTER_INVALID));
                 continue;
@@ -152,7 +152,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     public UnsubscribeResult handleUnsubscribe(ClientConnection connection, UnsubscribeRequest request) {
         List<UnsubscribeItemResult> results = new ArrayList<>();
         for (String topicFilter : request.topicFilters()) {
-            if (!topicMatcher.isValidFilter(topicFilter)) {
+            if (!mqttTopicSupport.isValidFilter(topicFilter)) {
                 brokerEventSink.protocolWarning(connection, "Rejected invalid topic filter for unsubscribe: " + topicFilter);
                 results.add(UnsubscribeItemResult.rejected(topicFilter, MqttUnsubAckReasonCode.TOPIC_FILTER_INVALID));
                 continue;
@@ -178,7 +178,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
 
     @Override
     public PublishResult handlePublish(ClientConnection connection, PublishRequest request) {
-        if (!topicMatcher.isValidTopicName(request.topicName())) {
+        if (!mqttTopicSupport.isValidTopicName(request.topicName())) {
             brokerEventSink.protocolWarning(connection, "Rejected publish with invalid topic name: " + request.topicName());
             return PublishResult.rejectedWithDisconnect(MqttDisconnectReasonCode.TOPIC_NAME_INVALID);
         }
