@@ -1,29 +1,30 @@
-package io.github.vxmqmqtt.vxmq.routing;
+package io.github.vxmqmqtt.vxmq.routing.eval;
 
+import io.github.vxmqmqtt.vxmq.routing.SubscriptionBinding;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * One node in the in-memory subscription tree.
+ * Test-only mutable node used by the unsafe baseline and owner-based evaluation candidates.
  */
-final class SubscriptionTreeNode {
+final class MutableSubscriptionTreeNode {
 
-    private final Map<String, SubscriptionTreeNode> exactChildren = new LinkedHashMap<>();
-    private SubscriptionTreeNode singleLevelWildcardChild;
+    private final Map<String, MutableSubscriptionTreeNode> exactChildren = new LinkedHashMap<>();
+    private MutableSubscriptionTreeNode singleLevelWildcardChild;
     private final Map<String, SubscriptionBinding> terminalBindings = new LinkedHashMap<>();
     private final Map<String, SubscriptionBinding> multiLevelWildcardBindings = new LinkedHashMap<>();
 
-    Map<String, SubscriptionTreeNode> exactChildren() {
+    Map<String, MutableSubscriptionTreeNode> exactChildren() {
         return exactChildren;
     }
 
-    SubscriptionTreeNode singleLevelWildcardChild() {
+    MutableSubscriptionTreeNode singleLevelWildcardChild() {
         return singleLevelWildcardChild;
     }
 
-    SubscriptionTreeNode ensureSingleLevelWildcardChild() {
+    MutableSubscriptionTreeNode ensureSingleLevelWildcardChild() {
         if (singleLevelWildcardChild == null) {
-            singleLevelWildcardChild = new SubscriptionTreeNode();
+            singleLevelWildcardChild = new MutableSubscriptionTreeNode();
         }
         return singleLevelWildcardChild;
     }
@@ -47,16 +48,5 @@ final class SubscriptionTreeNode {
                 && singleLevelWildcardChild == null
                 && terminalBindings.isEmpty()
                 && multiLevelWildcardBindings.isEmpty();
-    }
-
-    int nodeCount() {
-        int count = 1;
-        for (SubscriptionTreeNode child : exactChildren.values()) {
-            count += child.nodeCount();
-        }
-        if (singleLevelWildcardChild != null) {
-            count += singleLevelWildcardChild.nodeCount();
-        }
-        return count;
     }
 }

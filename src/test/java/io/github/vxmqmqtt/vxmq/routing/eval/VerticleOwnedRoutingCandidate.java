@@ -1,7 +1,5 @@
 package io.github.vxmqmqtt.vxmq.routing.eval;
 
-import io.github.vxmqmqtt.vxmq.routing.DefaultMqttTopicSupport;
-import io.github.vxmqmqtt.vxmq.routing.InMemorySubscriptionRegistry;
 import io.github.vxmqmqtt.vxmq.routing.SubscriptionBinding;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.Context;
@@ -102,7 +100,7 @@ final class VerticleOwnedRoutingCandidate implements RoutingRegistryCandidate {
 
     private static final class OwnerVerticle extends AbstractVerticle {
 
-        private final InMemorySubscriptionRegistry registry = new InMemorySubscriptionRegistry(new DefaultMqttTopicSupport());
+        private final MutableTreeSubscriptionRegistry registry = new MutableTreeSubscriptionRegistry();
         private volatile Context ownerContext;
 
         @Override
@@ -110,7 +108,7 @@ final class VerticleOwnedRoutingCandidate implements RoutingRegistryCandidate {
             ownerContext = context;
         }
 
-        InMemorySubscriptionRegistry registry() {
+        MutableTreeSubscriptionRegistry registry() {
             return registry;
         }
 

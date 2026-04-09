@@ -15,6 +15,8 @@
         <quarkus.platform.version>3.27.2</quarkus.platform.version>
         <skipITs>true</skipITs>
         <surefire-plugin.version>3.5.3</surefire-plugin.version>
+        <test.excludedTags>routing-eval</test.excludedTags>
+        <test.includedTags></test.includedTags>
     </properties>
 
     <dependencyManagement>
@@ -141,6 +143,8 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>${surefire-plugin.version}</version>
                 <configuration>
+                    <excludedGroups>${test.excludedTags}</excludedGroups>
+                    <groups>${test.includedTags}</groups>
                     <systemPropertyVariables>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
                         <maven.home>${maven.home}</maven.home>
@@ -170,6 +174,13 @@
     </build>
 
     <profiles>
+        <profile>
+            <id>routing-eval</id>
+            <properties>
+                <test.excludedTags></test.excludedTags>
+                <test.includedTags>routing-eval</test.includedTags>
+            </properties>
+        </profile>
         <profile>
             <id>native</id>
             <activation>

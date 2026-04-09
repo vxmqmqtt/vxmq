@@ -1,16 +1,21 @@
-package io.github.vxmqmqtt.vxmq.routing;
+package io.github.vxmqmqtt.vxmq.routing.eval;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import io.github.vxmqmqtt.vxmq.routing.DefaultMqttTopicSupport;
+import io.github.vxmqmqtt.vxmq.routing.InMemorySubscriptionRegistry;
+import io.github.vxmqmqtt.vxmq.routing.SubscriptionBinding;
 import io.netty.handler.codec.mqtt.MqttQoS;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
- * Repeatable comparison harness between the current subscription tree and a linear-scan baseline.
+ * Legacy comparison harness between the current production registry and a linear-scan baseline.
  */
+@Tag("routing-eval")
 class SubscriptionRegistryBenchmarkTest {
 
     private final DefaultMqttTopicSupport mqttTopicSupport = new DefaultMqttTopicSupport();

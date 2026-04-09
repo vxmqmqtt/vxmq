@@ -1,7 +1,5 @@
 package io.github.vxmqmqtt.vxmq.routing.eval;
 
-import io.github.vxmqmqtt.vxmq.routing.DefaultMqttTopicSupport;
-import io.github.vxmqmqtt.vxmq.routing.InMemorySubscriptionRegistry;
 import io.github.vxmqmqtt.vxmq.routing.SubscriptionBinding;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -11,7 +9,7 @@ import java.util.Collection;
  */
 final class SynchronizedTreeRoutingCandidate implements RoutingRegistryCandidate {
 
-    private final InMemorySubscriptionRegistry delegate = new InMemorySubscriptionRegistry(new DefaultMqttTopicSupport());
+    private final MutableTreeSubscriptionRegistry delegate = new MutableTreeSubscriptionRegistry();
 
     @Override
     public String name() {

@@ -88,14 +88,15 @@ Topic Filter 与 Topic Name 各层级完全相同则匹配。
 ## 当前实现说明
 
 - 当前实现采用内存态订阅树索引，匹配复杂度不再依赖“扫描所有 filter”。
+- 当前主线采用 `snapshot / copy-on-write` 订阅树：读路径读取一次根快照后在不可变树上遍历，写路径通过路径复制和根替换发布新快照。
 - 会话删除时必须同步清理路由索引，避免派生索引残留导致消息被错误投递。
 - 同一客户端的重叠订阅在当前实现中只投递一次，相关决策见 [`../07-project/decisions/0003-m1-overlapping-subscription-delivery.md`](../07-project/decisions/0003-m1-overlapping-subscription-delivery.md)。
 - Shared Subscription 仍未进入当前实现范围，因此路由结果当前不携带共享组语义。
-- 当前主线订阅树仍未完成并发读写安全加固。
 - 并发安全策略的原型评估已完成，相关结论见 [`../07-project/decisions/0006-routing-concurrency-strategy.md`](../07-project/decisions/0006-routing-concurrency-strategy.md)。
+- 评估候选与 benchmark harness 作为独立评估套件保留，不进入默认回归路径。
 
 ## 演进方向
 
 - 若后续引入 Shared Subscription，路由结果需要显式携带共享组信息。
 - 若后续引入 Retained Message，路由层仍只负责匹配，不直接负责保留消息存储。
-- 并发读写安全的下一步默认方向是 `snapshot / copy-on-write`，而不是将 routing 直接收敛为 single-owner Verticle。
+- 并发读写安全的主线方向已经定为 `snapshot / copy-on-write`，而不是将 routing 直接收敛为 single-owner Verticle。

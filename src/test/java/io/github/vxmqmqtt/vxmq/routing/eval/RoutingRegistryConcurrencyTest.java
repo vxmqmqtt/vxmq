@@ -18,11 +18,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DynamicTest;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.TestFactory;
 
 /**
  * Verifies that all routing concurrency candidates preserve MQTT matching semantics under shared stress.
  */
+@Tag("routing-eval")
 class RoutingRegistryConcurrencyTest {
 
     // Verifies that each candidate returns the same steady-state matches as the current subscription-tree semantics.
