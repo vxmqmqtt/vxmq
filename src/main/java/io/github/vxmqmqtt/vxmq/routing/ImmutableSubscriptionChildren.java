@@ -5,27 +5,37 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 /**
- * Compact immutable child-node container optimized for the common empty and single-child cases.
+ * Compact immutable child-node container optimized for empty/single/small cases and sharded for large fan-out levels.
  */
 final class ImmutableSubscriptionChildren {
 
+    private static final int SMALL_MAX = 4;
+    private static final int BUCKET_COUNT = 64;
+    private static final int BUCKET_MASK = BUCKET_COUNT - 1;
+
     private static final ImmutableSubscriptionChildren EMPTY =
-            new ImmutableSubscriptionChildren(0, null, null, null);
+            new ImmutableSubscriptionChildren(0, null, null, null, null, null);
 
     private final int size;
     private final String singleLevel;
     private final ImmutableSubscriptionTreeNode singleChild;
-    private final Map<String, ImmutableSubscriptionTreeNode> manyChildren;
+    private final String[] smallLevels;
+    private final ImmutableSubscriptionTreeNode[] smallChildren;
+    private final Object[] bucketChildren;
 
     private ImmutableSubscriptionChildren(
             int size,
             String singleLevel,
             ImmutableSubscriptionTreeNode singleChild,
-            Map<String, ImmutableSubscriptionTreeNode> manyChildren) {
+            String[] smallLevels,
+            ImmutableSubscriptionTreeNode[] smallChildren,
+            Object[] bucketChildren) {
         this.size = size;
         this.singleLevel = singleLevel;
         this.singleChild = singleChild;
-        this.manyChildren = manyChildren;
+        this.smallLevels = smallLevels;
+        this.smallChildren = smallChildren;
+        this.bucketChildren = bucketChildren;
     }
 
     static ImmutableSubscriptionChildren empty() {
@@ -40,7 +50,10 @@ final class ImmutableSubscriptionChildren {
             Map.Entry<String, ImmutableSubscriptionTreeNode> entry = children.entrySet().iterator().next();
             return singleton(entry.getKey(), entry.getValue());
         }
-        return new ImmutableSubscriptionChildren(children.size(), null, null, new HashMap<>(children));
+        if (children.size() <= SMALL_MAX) {
+            return small(children);
+        }
+        return bucketed(children);
     }
 
     boolean isEmpty() {
@@ -48,58 +61,135 @@ final class ImmutableSubscriptionChildren {
     }
 
     ImmutableSubscriptionTreeNode get(String level) {
-        return switch (size) {
-            case 0 -> null;
-            case 1 -> singleLevel.equals(level) ? singleChild : null;
-            default -> manyChildren.get(level);
+        return switch (representation()) {
+            case EMPTY -> null;
+            case SINGLE -> singleLevel.equals(level) ? singleChild : null;
+            case SMALL -> getFromSmall(level);
+            case BUCKETED -> bucket(level).get(level);
         };
     }
 
     ImmutableSubscriptionChildren put(String level, ImmutableSubscriptionTreeNode child) {
-        return switch (size) {
-            case 0 -> singleton(level, child);
-            case 1 -> putIntoSingleton(level, child);
-            default -> putIntoMany(level, child);
+        return switch (representation()) {
+            case EMPTY -> singleton(level, child);
+            case SINGLE -> putIntoSingleton(level, child);
+            case SMALL -> putIntoSmall(level, child);
+            case BUCKETED -> putIntoBuckets(level, child);
         };
     }
 
     RemoveResult remove(String level) {
-        return switch (size) {
-            case 0 -> new RemoveResult(this, false);
-            case 1 -> removeFromSingleton(level);
-            default -> removeFromMany(level);
+        return switch (representation()) {
+            case EMPTY -> new RemoveResult(this, false);
+            case SINGLE -> removeFromSingleton(level);
+            case SMALL -> removeFromSmall(level);
+            case BUCKETED -> removeFromBuckets(level);
         };
     }
 
     void forEachChild(Consumer<ImmutableSubscriptionTreeNode> consumer) {
-        switch (size) {
-            case 0 -> {
+        switch (representation()) {
+            case EMPTY -> {
             }
-            case 1 -> consumer.accept(singleChild);
-            default -> manyChildren.values().forEach(consumer);
+            case SINGLE -> consumer.accept(singleChild);
+            case SMALL -> {
+                for (ImmutableSubscriptionTreeNode child : smallChildren) {
+                    consumer.accept(child);
+                }
+            }
+            case BUCKETED -> {
+                for (Object bucket : bucketChildren) {
+                    if (bucket != null) {
+                        typedBucket(bucket).values().forEach(consumer);
+                    }
+                }
+            }
         }
+    }
+
+    private Representation representation() {
+        if (size == 0) {
+            return Representation.EMPTY;
+        }
+        if (size == 1) {
+            return Representation.SINGLE;
+        }
+        if (size <= SMALL_MAX) {
+            return Representation.SMALL;
+        }
+        return Representation.BUCKETED;
+    }
+
+    private ImmutableSubscriptionTreeNode getFromSmall(String level) {
+        for (int index = 0; index < smallLevels.length; index++) {
+            if (smallLevels[index].equals(level)) {
+                return smallChildren[index];
+            }
+        }
+        return null;
     }
 
     private ImmutableSubscriptionChildren putIntoSingleton(String level, ImmutableSubscriptionTreeNode child) {
         if (singleLevel.equals(level)) {
             return singleChild == child ? this : singleton(level, child);
         }
-
-        Map<String, ImmutableSubscriptionTreeNode> children = new HashMap<>(4);
-        children.put(singleLevel, singleChild);
-        children.put(level, child);
-        return new ImmutableSubscriptionChildren(2, null, null, children);
+        return new ImmutableSubscriptionChildren(
+                2,
+                null,
+                null,
+                new String[] {singleLevel, level},
+                new ImmutableSubscriptionTreeNode[] {singleChild, child},
+                null);
     }
 
-    private ImmutableSubscriptionChildren putIntoMany(String level, ImmutableSubscriptionTreeNode child) {
-        ImmutableSubscriptionTreeNode existing = manyChildren.get(level);
-        if (existing == child) {
+    private ImmutableSubscriptionChildren putIntoSmall(String level, ImmutableSubscriptionTreeNode child) {
+        int existingIndex = indexOfSmall(level);
+        if (existingIndex >= 0) {
+            if (smallChildren[existingIndex] == child) {
+                return this;
+            }
+            ImmutableSubscriptionTreeNode[] updatedChildren = smallChildren.clone();
+            updatedChildren[existingIndex] = child;
+            return new ImmutableSubscriptionChildren(size, null, null, smallLevels, updatedChildren, null);
+        }
+
+        if (size < SMALL_MAX) {
+            String[] updatedLevels = new String[size + 1];
+            ImmutableSubscriptionTreeNode[] updatedChildren = new ImmutableSubscriptionTreeNode[size + 1];
+            System.arraycopy(smallLevels, 0, updatedLevels, 0, size);
+            System.arraycopy(smallChildren, 0, updatedChildren, 0, size);
+            updatedLevels[size] = level;
+            updatedChildren[size] = child;
+            return new ImmutableSubscriptionChildren(size + 1, null, null, updatedLevels, updatedChildren, null);
+        }
+
+        Map<String, ImmutableSubscriptionTreeNode> children = new HashMap<>(size + 1);
+        for (int index = 0; index < size; index++) {
+            children.put(smallLevels[index], smallChildren[index]);
+        }
+        children.put(level, child);
+        return bucketed(children);
+    }
+
+    private ImmutableSubscriptionChildren putIntoBuckets(String level, ImmutableSubscriptionTreeNode child) {
+        int bucketIndex = bucketIndex(level);
+        Map<String, ImmutableSubscriptionTreeNode> existingBucket = bucket(level);
+        ImmutableSubscriptionTreeNode existingChild = existingBucket.get(level);
+        if (existingChild == child) {
             return this;
         }
 
-        Map<String, ImmutableSubscriptionTreeNode> children = new HashMap<>(manyChildren);
-        children.put(level, child);
-        return new ImmutableSubscriptionChildren(children.size(), null, null, children);
+        Map<String, ImmutableSubscriptionTreeNode> updatedBucket = new HashMap<>(existingBucket);
+        updatedBucket.put(level, child);
+        Object[] updatedBuckets = bucketChildren.clone();
+        updatedBuckets[bucketIndex] = updatedBucket;
+        return new ImmutableSubscriptionChildren(
+                existingChild == null ? size + 1 : size,
+                null,
+                null,
+                null,
+                null,
+                updatedBuckets);
     }
 
     private RemoveResult removeFromSingleton(String level) {
@@ -109,18 +199,129 @@ final class ImmutableSubscriptionChildren {
         return new RemoveResult(empty(), true);
     }
 
-    private RemoveResult removeFromMany(String level) {
-        if (!manyChildren.containsKey(level)) {
+    private RemoveResult removeFromSmall(String level) {
+        int existingIndex = indexOfSmall(level);
+        if (existingIndex < 0) {
+            return new RemoveResult(this, false);
+        }
+        if (size == 2) {
+            int remainingIndex = existingIndex == 0 ? 1 : 0;
+            return new RemoveResult(singleton(smallLevels[remainingIndex], smallChildren[remainingIndex]), true);
+        }
+
+        String[] updatedLevels = new String[size - 1];
+        ImmutableSubscriptionTreeNode[] updatedChildren = new ImmutableSubscriptionTreeNode[size - 1];
+        copyWithoutIndex(smallLevels, updatedLevels, existingIndex);
+        copyWithoutIndex(smallChildren, updatedChildren, existingIndex);
+        return new RemoveResult(
+                new ImmutableSubscriptionChildren(size - 1, null, null, updatedLevels, updatedChildren, null),
+                true);
+    }
+
+    private RemoveResult removeFromBuckets(String level) {
+        int bucketIndex = bucketIndex(level);
+        Map<String, ImmutableSubscriptionTreeNode> existingBucket = bucket(level);
+        if (!existingBucket.containsKey(level)) {
             return new RemoveResult(this, false);
         }
 
-        Map<String, ImmutableSubscriptionTreeNode> children = new HashMap<>(manyChildren);
-        children.remove(level);
-        return new RemoveResult(from(children), true);
+        if (size - 1 <= SMALL_MAX) {
+            Map<String, ImmutableSubscriptionTreeNode> children = flattenBucketsExcept(level);
+            return new RemoveResult(from(children), true);
+        }
+
+        Map<String, ImmutableSubscriptionTreeNode> updatedBucket = new HashMap<>(existingBucket);
+        updatedBucket.remove(level);
+        Object[] updatedBuckets = bucketChildren.clone();
+        updatedBuckets[bucketIndex] = updatedBucket.isEmpty() ? null : updatedBucket;
+        return new RemoveResult(
+                new ImmutableSubscriptionChildren(size - 1, null, null, null, null, updatedBuckets),
+                true);
+    }
+
+    private int indexOfSmall(String level) {
+        for (int index = 0; index < size; index++) {
+            if (smallLevels[index].equals(level)) {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    private Map<String, ImmutableSubscriptionTreeNode> flattenBucketsExcept(String removedLevel) {
+        Map<String, ImmutableSubscriptionTreeNode> flattened = new HashMap<>(size - 1);
+        for (Object bucket : bucketChildren) {
+            if (bucket == null) {
+                continue;
+            }
+            Map<String, ImmutableSubscriptionTreeNode> typedBucket = typedBucket(bucket);
+            typedBucket.forEach((level, child) -> {
+                if (!removedLevel.equals(level)) {
+                    flattened.put(level, child);
+                }
+            });
+        }
+        return flattened;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, ImmutableSubscriptionTreeNode> bucket(String level) {
+        Object bucket = bucketChildren[bucketIndex(level)];
+        return bucket == null ? Map.of() : (Map<String, ImmutableSubscriptionTreeNode>) bucket;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, ImmutableSubscriptionTreeNode> typedBucket(Object bucket) {
+        return (Map<String, ImmutableSubscriptionTreeNode>) bucket;
+    }
+
+    private static int bucketIndex(String level) {
+        return level.hashCode() & BUCKET_MASK;
     }
 
     private static ImmutableSubscriptionChildren singleton(String level, ImmutableSubscriptionTreeNode child) {
-        return new ImmutableSubscriptionChildren(1, level, child, null);
+        return new ImmutableSubscriptionChildren(1, level, child, null, null, null);
+    }
+
+    private static ImmutableSubscriptionChildren small(Map<String, ImmutableSubscriptionTreeNode> children) {
+        String[] levels = new String[children.size()];
+        ImmutableSubscriptionTreeNode[] values = new ImmutableSubscriptionTreeNode[children.size()];
+        int index = 0;
+        for (Map.Entry<String, ImmutableSubscriptionTreeNode> entry : children.entrySet()) {
+            levels[index] = entry.getKey();
+            values[index] = entry.getValue();
+            index++;
+        }
+        return new ImmutableSubscriptionChildren(children.size(), null, null, levels, values, null);
+    }
+
+    private static ImmutableSubscriptionChildren bucketed(Map<String, ImmutableSubscriptionTreeNode> children) {
+        Object[] buckets = new Object[BUCKET_COUNT];
+        children.forEach((level, child) -> {
+            int bucketIndex = bucketIndex(level);
+            @SuppressWarnings("unchecked")
+            Map<String, ImmutableSubscriptionTreeNode> bucket =
+                    buckets[bucketIndex] == null ? new HashMap<>() : new HashMap<>((Map<String, ImmutableSubscriptionTreeNode>) buckets[bucketIndex]);
+            bucket.put(level, child);
+            buckets[bucketIndex] = bucket;
+        });
+        return new ImmutableSubscriptionChildren(children.size(), null, null, null, null, buckets);
+    }
+
+    private static void copyWithoutIndex(Object[] source, Object[] destination, int removedIndex) {
+        if (removedIndex > 0) {
+            System.arraycopy(source, 0, destination, 0, removedIndex);
+        }
+        if (removedIndex < source.length - 1) {
+            System.arraycopy(source, removedIndex + 1, destination, removedIndex, source.length - removedIndex - 1);
+        }
+    }
+
+    private enum Representation {
+        EMPTY,
+        SINGLE,
+        SMALL,
+        BUCKETED
     }
 
     record RemoveResult(ImmutableSubscriptionChildren children, boolean removed) {
