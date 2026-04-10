@@ -131,4 +131,30 @@ class InMemorySubscriptionRegistryTest {
                         .sorted()
                         .toList());
     }
+
+    // Verifies that batch snapshot rebuild preserves routing results for a high-fanout exact-child level.
+    @Test
+    void shouldPreserveHighFanoutMatchesWhenReplacingAllSubscriptions() {
+        List<SubscriptionBinding> bindings = java.util.stream.IntStream.range(0, 128)
+                .mapToObj(index -> new SubscriptionBinding(
+                        "client-" + index,
+                        "sensors/device-" + index + "/temperature",
+                        MqttQoS.AT_MOST_ONCE))
+                .toList();
+        InMemorySubscriptionRegistry incrementalRegistry = new InMemorySubscriptionRegistry(mqttTopicSupport);
+        bindings.forEach(incrementalRegistry::addSubscription);
+        InMemorySubscriptionRegistry batchRegistry = new InMemorySubscriptionRegistry(mqttTopicSupport);
+
+        batchRegistry.replaceAllSubscriptions(bindings);
+
+        assertEquals(
+                incrementalRegistry.match("sensors/device-64/temperature").stream()
+                        .map(SubscriptionBinding::clientId)
+                        .sorted()
+                        .toList(),
+                batchRegistry.match("sensors/device-64/temperature").stream()
+                        .map(SubscriptionBinding::clientId)
+                        .sorted()
+                        .toList());
+    }
 }

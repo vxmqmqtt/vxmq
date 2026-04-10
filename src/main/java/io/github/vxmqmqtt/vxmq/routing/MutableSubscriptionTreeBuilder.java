@@ -66,15 +66,46 @@ final class MutableSubscriptionTreeBuilder {
         }
 
         private ImmutableSubscriptionTreeNode toImmutable() {
-            Map<String, ImmutableSubscriptionTreeNode> immutableChildren = new HashMap<>(exactChildren.size());
-            exactChildren.forEach((level, child) -> immutableChildren.put(level, child.toImmutable()));
+            ImmutableSubscriptionChildren immutableChildren = toImmutableChildren();
             ImmutableSubscriptionTreeNode wildcardChild =
                     singleLevelWildcardChild == null ? null : singleLevelWildcardChild.toImmutable();
             return ImmutableSubscriptionTreeNode.create(
-                    ImmutableSubscriptionChildren.from(immutableChildren),
+                    immutableChildren,
                     wildcardChild,
                     ImmutableSubscriptionBindings.from(terminalBindings),
                     ImmutableSubscriptionBindings.from(multiLevelWildcardBindings));
+        }
+
+        private ImmutableSubscriptionChildren toImmutableChildren() {
+            if (exactChildren.isEmpty()) {
+                return ImmutableSubscriptionChildren.empty();
+            }
+            if (exactChildren.size() == 1) {
+                Map.Entry<String, MutableNode> entry = exactChildren.entrySet().iterator().next();
+                return ImmutableSubscriptionChildren.from(Map.of(entry.getKey(), entry.getValue().toImmutable()));
+            }
+            if (exactChildren.size() <= 4) {
+                String[] levels = new String[exactChildren.size()];
+                ImmutableSubscriptionTreeNode[] children = new ImmutableSubscriptionTreeNode[exactChildren.size()];
+                int index = 0;
+                for (Map.Entry<String, MutableNode> entry : exactChildren.entrySet()) {
+                    levels[index] = entry.getKey();
+                    children[index] = entry.getValue().toImmutable();
+                    index++;
+                }
+                return ImmutableSubscriptionChildren.fromSmallSnapshot(levels, children);
+            }
+
+            Object[] buckets = new Object[64];
+            exactChildren.forEach((level, child) -> {
+                int bucketIndex = level.hashCode() & 63;
+                @SuppressWarnings("unchecked")
+                Map<String, ImmutableSubscriptionTreeNode> bucket =
+                        buckets[bucketIndex] == null ? new HashMap<>() : (Map<String, ImmutableSubscriptionTreeNode>) buckets[bucketIndex];
+                bucket.put(level, child.toImmutable());
+                buckets[bucketIndex] = bucket;
+            });
+            return ImmutableSubscriptionChildren.fromBucketSnapshot(buckets, exactChildren.size());
         }
     }
 }

@@ -56,6 +56,43 @@ final class ImmutableSubscriptionChildren {
         return bucketed(children);
     }
 
+    static ImmutableSubscriptionChildren fromSmallSnapshot(
+            String[] levels,
+            ImmutableSubscriptionTreeNode[] children) {
+        if (levels.length != children.length) {
+            throw new IllegalArgumentException("Levels and children must have the same size");
+        }
+        if (levels.length == 0) {
+            return empty();
+        }
+        if (levels.length == 1) {
+            return singleton(levels[0], children[0]);
+        }
+        if (levels.length > SMALL_MAX) {
+            throw new IllegalArgumentException("Small snapshot cannot exceed " + SMALL_MAX + " entries");
+        }
+        return new ImmutableSubscriptionChildren(
+                levels.length,
+                null,
+                null,
+                levels.clone(),
+                children.clone(),
+                null);
+    }
+
+    static ImmutableSubscriptionChildren fromBucketSnapshot(Object[] bucketChildren, int size) {
+        if (size == 0) {
+            return empty();
+        }
+        if (size <= SMALL_MAX) {
+            throw new IllegalArgumentException("Bucket snapshot requires more than " + SMALL_MAX + " entries");
+        }
+        if (bucketChildren.length != BUCKET_COUNT) {
+            throw new IllegalArgumentException("Bucket snapshot must contain " + BUCKET_COUNT + " buckets");
+        }
+        return new ImmutableSubscriptionChildren(size, null, null, null, null, bucketChildren.clone());
+    }
+
     boolean isEmpty() {
         return size == 0;
     }
@@ -292,7 +329,7 @@ final class ImmutableSubscriptionChildren {
             values[index] = entry.getValue();
             index++;
         }
-        return new ImmutableSubscriptionChildren(children.size(), null, null, levels, values, null);
+        return fromSmallSnapshot(levels, values);
     }
 
     private static ImmutableSubscriptionChildren bucketed(Map<String, ImmutableSubscriptionTreeNode> children) {
@@ -301,11 +338,11 @@ final class ImmutableSubscriptionChildren {
             int bucketIndex = bucketIndex(level);
             @SuppressWarnings("unchecked")
             Map<String, ImmutableSubscriptionTreeNode> bucket =
-                    buckets[bucketIndex] == null ? new HashMap<>() : new HashMap<>((Map<String, ImmutableSubscriptionTreeNode>) buckets[bucketIndex]);
+                    buckets[bucketIndex] == null ? new HashMap<>() : (Map<String, ImmutableSubscriptionTreeNode>) buckets[bucketIndex];
             bucket.put(level, child);
             buckets[bucketIndex] = bucket;
         });
-        return new ImmutableSubscriptionChildren(children.size(), null, null, null, null, buckets);
+        return fromBucketSnapshot(buckets, children.size());
     }
 
     private static void copyWithoutIndex(Object[] source, Object[] destination, int removedIndex) {

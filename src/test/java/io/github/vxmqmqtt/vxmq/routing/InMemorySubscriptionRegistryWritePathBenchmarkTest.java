@@ -41,16 +41,27 @@ class InMemorySubscriptionRegistryWritePathBenchmarkTest {
             baselineBindings.forEach(registry::addSubscription);
         });
 
+        long builderLoadNanos = measureRepeated(20, () -> {
+            MutableSubscriptionTreeBuilder builder = new MutableSubscriptionTreeBuilder(mqttTopicSupport);
+            builder.addAll(baselineBindings);
+        });
+
+        MutableSubscriptionTreeBuilder preparedBuilder = new MutableSubscriptionTreeBuilder(mqttTopicSupport);
+        preparedBuilder.addAll(baselineBindings);
+        long freezeToImmutableNanos = measureRepeated(20, preparedBuilder::build);
+
         long batchReplaceNanos = measureRepeated(20, () -> {
             InMemorySubscriptionRegistry registry = new InMemorySubscriptionRegistry(mqttTopicSupport);
             registry.replaceAllSubscriptions(baselineBindings);
         });
 
         System.out.printf(
-                "candidate=production-snapshot-tree workload=write-diagnostics singleAddCycleNanos=%d singleRemoveCycleNanos=%d incrementalLoadNanos=%d batchReplaceNanos=%d%n",
+                "candidate=production-snapshot-tree workload=write-diagnostics singleAddCycleNanos=%d singleRemoveCycleNanos=%d incrementalLoadNanos=%d builderLoadNanos=%d freezeToImmutableNanos=%d batchReplaceNanos=%d%n",
                 singleAddCycleNanos,
                 singleRemoveCycleNanos,
                 incrementalLoadNanos,
+                builderLoadNanos,
+                freezeToImmutableNanos,
                 batchReplaceNanos);
     }
 
