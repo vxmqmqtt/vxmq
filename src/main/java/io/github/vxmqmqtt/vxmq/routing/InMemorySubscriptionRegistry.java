@@ -69,6 +69,15 @@ public class InMemorySubscriptionRegistry implements SubscriptionRegistry {
     }
 
     /**
+     * Rebuilds the entire routing snapshot from an authoritative binding set in one publication step.
+     */
+    void replaceAllSubscriptions(Collection<SubscriptionBinding> bindings) {
+        MutableSubscriptionTreeBuilder builder = new MutableSubscriptionTreeBuilder(mqttTopicSupport);
+        builder.addAll(bindings);
+        root.set(builder.build());
+    }
+
+    /**
      * Exposes the current tree node count for pruning-oriented tests.
      */
     int nodeCount() {

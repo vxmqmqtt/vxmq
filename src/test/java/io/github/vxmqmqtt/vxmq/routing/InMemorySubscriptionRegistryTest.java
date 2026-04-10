@@ -7,6 +7,7 @@ import io.netty.handler.codec.mqtt.MqttQoS;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -78,5 +79,56 @@ class InMemorySubscriptionRegistryTest {
                 .toList();
 
         assertEquals(List.of("client-a"), matches);
+    }
+
+    // Verifies that batch snapshot replacement builds the same routing result as incremental subscription registration.
+    @Test
+    void shouldBuildEquivalentSnapshotWhenReplacingAllSubscriptions() {
+        List<SubscriptionBinding> bindings = List.of(
+                new SubscriptionBinding("client-a", "sensors/room-1/temperature", MqttQoS.AT_MOST_ONCE),
+                new SubscriptionBinding("client-b", "sensors/+/temperature", MqttQoS.AT_LEAST_ONCE),
+                new SubscriptionBinding("client-c", "sensors/#", MqttQoS.AT_MOST_ONCE),
+                new SubscriptionBinding("client-d", "alerts/room-1/#", MqttQoS.AT_MOST_ONCE));
+        InMemorySubscriptionRegistry incrementalRegistry = new InMemorySubscriptionRegistry(mqttTopicSupport);
+        bindings.forEach(incrementalRegistry::addSubscription);
+        InMemorySubscriptionRegistry batchRegistry = new InMemorySubscriptionRegistry(mqttTopicSupport);
+
+        batchRegistry.replaceAllSubscriptions(bindings);
+
+        for (Map.Entry<String, List<String>> entry : Map.<String, List<String>>of(
+                        "sensors/room-1/temperature", List.of("client-a", "client-b", "client-c"),
+                        "alerts/room-1/fire", List.of("client-d"),
+                        "alerts/room-2/fire", List.of())
+                .entrySet()) {
+            assertEquals(
+                    incrementalRegistry.match(entry.getKey()).stream()
+                            .map(SubscriptionBinding::clientId)
+                            .sorted()
+                            .toList(),
+                    batchRegistry.match(entry.getKey()).stream()
+                            .map(SubscriptionBinding::clientId)
+                            .sorted()
+                            .toList(),
+                    "topic=" + entry.getKey());
+        }
+    }
+
+    // Verifies that batch snapshot replacement discards bindings that are no longer present in the authoritative input set.
+    @Test
+    void shouldReplacePreviousSnapshotWhenReplacingAllSubscriptions() {
+        InMemorySubscriptionRegistry registry = new InMemorySubscriptionRegistry(mqttTopicSupport);
+        registry.addSubscription(new SubscriptionBinding("client-old", "legacy/bridge/#", MqttQoS.AT_MOST_ONCE));
+
+        registry.replaceAllSubscriptions(List.of(
+                new SubscriptionBinding("client-new", "sensors/current/temperature", MqttQoS.AT_LEAST_ONCE),
+                new SubscriptionBinding("client-plus", "sensors/+/temperature", MqttQoS.AT_MOST_ONCE)));
+
+        assertTrue(registry.match("legacy/bridge/temperature").isEmpty());
+        assertEquals(
+                List.of("client-new", "client-plus"),
+                registry.match("sensors/current/temperature").stream()
+                        .map(SubscriptionBinding::clientId)
+                        .sorted()
+                        .toList());
     }
 }

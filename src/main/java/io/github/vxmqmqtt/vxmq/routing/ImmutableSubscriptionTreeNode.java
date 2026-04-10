@@ -1,6 +1,5 @@
 package io.github.vxmqmqtt.vxmq.routing;
 
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -8,19 +7,22 @@ import java.util.Map;
  */
 final class ImmutableSubscriptionTreeNode {
 
-    private static final ImmutableSubscriptionTreeNode EMPTY =
-            new ImmutableSubscriptionTreeNode(Map.of(), null, Map.of(), Map.of());
+    private static final ImmutableSubscriptionTreeNode EMPTY = new ImmutableSubscriptionTreeNode(
+            ImmutableSubscriptionChildren.empty(),
+            null,
+            ImmutableSubscriptionBindings.empty(),
+            ImmutableSubscriptionBindings.empty());
 
-    private final Map<String, ImmutableSubscriptionTreeNode> exactChildren;
+    private final ImmutableSubscriptionChildren exactChildren;
     private final ImmutableSubscriptionTreeNode singleLevelWildcardChild;
-    private final Map<String, SubscriptionBinding> terminalBindings;
-    private final Map<String, SubscriptionBinding> multiLevelWildcardBindings;
+    private final ImmutableSubscriptionBindings terminalBindings;
+    private final ImmutableSubscriptionBindings multiLevelWildcardBindings;
 
     private ImmutableSubscriptionTreeNode(
-            Map<String, ImmutableSubscriptionTreeNode> exactChildren,
+            ImmutableSubscriptionChildren exactChildren,
             ImmutableSubscriptionTreeNode singleLevelWildcardChild,
-            Map<String, SubscriptionBinding> terminalBindings,
-            Map<String, SubscriptionBinding> multiLevelWildcardBindings) {
+            ImmutableSubscriptionBindings terminalBindings,
+            ImmutableSubscriptionBindings multiLevelWildcardBindings) {
         this.exactChildren = exactChildren;
         this.singleLevelWildcardChild = singleLevelWildcardChild;
         this.terminalBindings = terminalBindings;
@@ -31,26 +33,38 @@ final class ImmutableSubscriptionTreeNode {
         return EMPTY;
     }
 
+    static ImmutableSubscriptionTreeNode create(
+            ImmutableSubscriptionChildren exactChildren,
+            ImmutableSubscriptionTreeNode singleLevelWildcardChild,
+            ImmutableSubscriptionBindings terminalBindings,
+            ImmutableSubscriptionBindings multiLevelWildcardBindings) {
+        if (exactChildren.isEmpty()
+                && singleLevelWildcardChild == null
+                && terminalBindings.isEmpty()
+                && multiLevelWildcardBindings.isEmpty()) {
+            return empty();
+        }
+        return new ImmutableSubscriptionTreeNode(
+                exactChildren,
+                singleLevelWildcardChild,
+                terminalBindings,
+                multiLevelWildcardBindings);
+    }
+
     ImmutableSubscriptionTreeNode add(String[] filterLevels, int levelIndex, SubscriptionBinding binding) {
         if (levelIndex == filterLevels.length) {
-            Map<String, SubscriptionBinding> updatedTerminalBindings = mutableBindingsCopy(terminalBindings);
-            updatedTerminalBindings.put(binding.clientId(), binding);
-            return new ImmutableSubscriptionTreeNode(
-                    exactChildren,
-                    singleLevelWildcardChild,
-                    immutableBindingsCopy(updatedTerminalBindings),
-                    multiLevelWildcardBindings);
+            ImmutableSubscriptionBindings updatedTerminalBindings = terminalBindings.put(binding);
+            return updatedTerminalBindings == terminalBindings
+                    ? this
+                    : create(exactChildren, singleLevelWildcardChild, updatedTerminalBindings, multiLevelWildcardBindings);
         }
 
         String level = filterLevels[levelIndex];
         if ("#".equals(level)) {
-            Map<String, SubscriptionBinding> updatedMultiLevelBindings = mutableBindingsCopy(multiLevelWildcardBindings);
-            updatedMultiLevelBindings.put(binding.clientId(), binding);
-            return new ImmutableSubscriptionTreeNode(
-                    exactChildren,
-                    singleLevelWildcardChild,
-                    terminalBindings,
-                    immutableBindingsCopy(updatedMultiLevelBindings));
+            ImmutableSubscriptionBindings updatedMultiLevelBindings = multiLevelWildcardBindings.put(binding);
+            return updatedMultiLevelBindings == multiLevelWildcardBindings
+                    ? this
+                    : create(exactChildren, singleLevelWildcardChild, terminalBindings, updatedMultiLevelBindings);
         }
 
         if ("+".equals(level)) {
@@ -58,18 +72,21 @@ final class ImmutableSubscriptionTreeNode {
                     singleLevelWildcardChild == null ? empty() : singleLevelWildcardChild;
             ImmutableSubscriptionTreeNode updatedWildcardChild =
                     currentWildcardChild.add(filterLevels, levelIndex + 1, binding);
-            return new ImmutableSubscriptionTreeNode(
-                    exactChildren,
-                    updatedWildcardChild,
-                    terminalBindings,
-                    multiLevelWildcardBindings);
+            return updatedWildcardChild == currentWildcardChild
+                    ? this
+                    : create(exactChildren, updatedWildcardChild, terminalBindings, multiLevelWildcardBindings);
         }
 
-        Map<String, ImmutableSubscriptionTreeNode> updatedChildren = new LinkedHashMap<>(exactChildren);
-        ImmutableSubscriptionTreeNode currentChild = updatedChildren.getOrDefault(level, empty());
-        updatedChildren.put(level, currentChild.add(filterLevels, levelIndex + 1, binding));
-        return new ImmutableSubscriptionTreeNode(
-                immutableChildCopy(updatedChildren),
+        ImmutableSubscriptionTreeNode currentChild = exactChildren.get(level);
+        if (currentChild == null) {
+            currentChild = empty();
+        }
+        ImmutableSubscriptionTreeNode updatedChild = currentChild.add(filterLevels, levelIndex + 1, binding);
+        if (updatedChild == currentChild) {
+            return this;
+        }
+        return create(
+                exactChildren.put(level, updatedChild),
                 singleLevelWildcardChild,
                 terminalBindings,
                 multiLevelWildcardBindings);
@@ -77,34 +94,26 @@ final class ImmutableSubscriptionTreeNode {
 
     RemoveResult remove(String[] filterLevels, int levelIndex, String clientId) {
         if (levelIndex == filterLevels.length) {
-            if (!terminalBindings.containsKey(clientId)) {
-                return new RemoveResult(this, false);
-            }
-            Map<String, SubscriptionBinding> updatedTerminalBindings = mutableBindingsCopy(terminalBindings);
-            updatedTerminalBindings.remove(clientId);
-            return new RemoveResult(
-                    prune(
-                            exactChildren,
-                            singleLevelWildcardChild,
-                            immutableBindingsCopy(updatedTerminalBindings),
-                            multiLevelWildcardBindings),
-                    true);
+            ImmutableSubscriptionBindings.RemoveResult removedTerminalBindings = terminalBindings.remove(clientId);
+            return removedTerminalBindings.removed()
+                    ? new RemoveResult(create(
+                    exactChildren,
+                    singleLevelWildcardChild,
+                    removedTerminalBindings.bindings(),
+                    multiLevelWildcardBindings), true)
+                    : new RemoveResult(this, false);
         }
 
         String level = filterLevels[levelIndex];
         if ("#".equals(level)) {
-            if (!multiLevelWildcardBindings.containsKey(clientId)) {
-                return new RemoveResult(this, false);
-            }
-            Map<String, SubscriptionBinding> updatedMultiLevelBindings = mutableBindingsCopy(multiLevelWildcardBindings);
-            updatedMultiLevelBindings.remove(clientId);
-            return new RemoveResult(
-                    prune(
-                            exactChildren,
-                            singleLevelWildcardChild,
-                            terminalBindings,
-                            immutableBindingsCopy(updatedMultiLevelBindings)),
-                    true);
+            ImmutableSubscriptionBindings.RemoveResult removedMultiLevelBindings = multiLevelWildcardBindings.remove(clientId);
+            return removedMultiLevelBindings.removed()
+                    ? new RemoveResult(create(
+                    exactChildren,
+                    singleLevelWildcardChild,
+                    terminalBindings,
+                    removedMultiLevelBindings.bindings()), true)
+                    : new RemoveResult(this, false);
         }
 
         if ("+".equals(level)) {
@@ -118,7 +127,7 @@ final class ImmutableSubscriptionTreeNode {
             ImmutableSubscriptionTreeNode updatedWildcardChild =
                     childResult.node().isEmpty() ? null : childResult.node();
             return new RemoveResult(
-                    prune(
+                    create(
                             exactChildren,
                             updatedWildcardChild,
                             terminalBindings,
@@ -136,15 +145,12 @@ final class ImmutableSubscriptionTreeNode {
             return new RemoveResult(this, false);
         }
 
-        Map<String, ImmutableSubscriptionTreeNode> updatedChildren = new LinkedHashMap<>(exactChildren);
-        if (childResult.node().isEmpty()) {
-            updatedChildren.remove(level);
-        } else {
-            updatedChildren.put(level, childResult.node());
-        }
+        ImmutableSubscriptionChildren updatedChildren = childResult.node().isEmpty()
+                ? exactChildren.remove(level).children()
+                : exactChildren.put(level, childResult.node());
         return new RemoveResult(
-                prune(
-                        immutableChildCopy(updatedChildren),
+                create(
+                        updatedChildren,
                         singleLevelWildcardChild,
                         terminalBindings,
                         multiLevelWildcardBindings),
@@ -152,9 +158,9 @@ final class ImmutableSubscriptionTreeNode {
     }
 
     void match(String[] topicLevels, int levelIndex, Map<String, SubscriptionBinding> deduplicated) {
-        mergeBindings(multiLevelWildcardBindings, deduplicated);
+        multiLevelWildcardBindings.mergeInto(deduplicated);
         if (levelIndex == topicLevels.length) {
-            mergeBindings(terminalBindings, deduplicated);
+            terminalBindings.mergeInto(deduplicated);
             return;
         }
 
@@ -169,13 +175,12 @@ final class ImmutableSubscriptionTreeNode {
 
     int nodeCount() {
         int count = 1;
-        for (ImmutableSubscriptionTreeNode child : exactChildren.values()) {
-            count += child.nodeCount();
-        }
+        int[] childCount = new int[1];
+        exactChildren.forEachChild(child -> childCount[0] += child.nodeCount());
         if (singleLevelWildcardChild != null) {
             count += singleLevelWildcardChild.nodeCount();
         }
-        return count;
+        return count + childCount[0];
     }
 
     boolean isEmpty() {
@@ -184,41 +189,6 @@ final class ImmutableSubscriptionTreeNode {
                 && terminalBindings.isEmpty()
                 && multiLevelWildcardBindings.isEmpty();
     }
-
-    private ImmutableSubscriptionTreeNode prune(
-            Map<String, ImmutableSubscriptionTreeNode> exactChildren,
-            ImmutableSubscriptionTreeNode singleLevelWildcardChild,
-            Map<String, SubscriptionBinding> terminalBindings,
-            Map<String, SubscriptionBinding> multiLevelWildcardBindings) {
-        ImmutableSubscriptionTreeNode candidate = new ImmutableSubscriptionTreeNode(
-                exactChildren,
-                singleLevelWildcardChild,
-                terminalBindings,
-                multiLevelWildcardBindings);
-        return candidate.isEmpty() ? empty() : candidate;
-    }
-
-    private void mergeBindings(
-            Map<String, SubscriptionBinding> bindings,
-            Map<String, SubscriptionBinding> deduplicated) {
-        for (SubscriptionBinding binding : bindings.values()) {
-            deduplicated.merge(binding.clientId(), binding, (left, right) ->
-                    left.grantedQos().value() >= right.grantedQos().value() ? left : right);
-        }
-    }
-
-    private Map<String, SubscriptionBinding> mutableBindingsCopy(Map<String, SubscriptionBinding> source) {
-        return new LinkedHashMap<>(source);
-    }
-
-    private Map<String, SubscriptionBinding> immutableBindingsCopy(Map<String, SubscriptionBinding> source) {
-        return source.isEmpty() ? Map.of() : Map.copyOf(source);
-    }
-
-    private Map<String, ImmutableSubscriptionTreeNode> immutableChildCopy(Map<String, ImmutableSubscriptionTreeNode> source) {
-        return source.isEmpty() ? Map.of() : Map.copyOf(source);
-    }
-
     record RemoveResult(ImmutableSubscriptionTreeNode node, boolean removed) {
     }
 }

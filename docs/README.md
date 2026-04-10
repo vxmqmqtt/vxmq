@@ -64,4 +64,4 @@ Broker 对 CONNECT、会话生命周期、QoS 1、Retained Message、Will Messag
 - 当前状态只在 `01-status/` 集中维护，其他设计文档不重复写阶段总结。
 - 设计文档优先追求长期稳定，不承载短期任务清单。
 - 重要实现选择进入 `07-project/decisions/`。
-- 性能/并发评估代码作为独立评估套件维护，不进入默认 `./mvnw test` 回归路径。
+- 性能/并发评估代码作为独立评估套件维护，不进入默认 `./mvnw test` 回归路径；routing 写路径评估需区分单次 churn 与整批 snapshot 重建。
