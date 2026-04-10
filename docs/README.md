@@ -6,7 +6,9 @@
 - `当前状态`：集中承载项目目前进行到哪里
 - `历史记录`：ADR、阶段验收等不可替代的留痕文档
 
-## 推荐阅读顺序
+## 首次阅读建议
+
+第一次进入项目时，建议先看这几份：
 
 1. [`00-foundation/vision.md`](00-foundation/vision.md)
 2. [`00-foundation/scope.md`](00-foundation/scope.md)
@@ -14,18 +16,52 @@
 4. [`01-status/current-status.md`](01-status/current-status.md)
 5. [`01-status/mqtt5-feature-matrix.md`](01-status/mqtt5-feature-matrix.md)
 6. [`02-architecture/architecture-overview.md`](02-architecture/architecture-overview.md)
-7. [`02-architecture/session-model.md`](02-architecture/session-model.md)
-8. [`02-architecture/offline-message-model.md`](02-architecture/offline-message-model.md)
-9. [`02-architecture/retained-message-model.md`](02-architecture/retained-message-model.md)
-10. [`02-architecture/will-message-model.md`](02-architecture/will-message-model.md)
-11. [`02-architecture/subscription-tree-model.md`](02-architecture/subscription-tree-model.md)
-12. [`03-protocol/connect-flow.md`](03-protocol/connect-flow.md)
-13. [`03-protocol/session-lifecycle.md`](03-protocol/session-lifecycle.md)
-14. [`03-protocol/qos1-flow.md`](03-protocol/qos1-flow.md)
-15. [`03-protocol/retain-flow.md`](03-protocol/retain-flow.md)
-16. [`03-protocol/will-flow.md`](03-protocol/will-flow.md)
-17. [`03-protocol/topic-match-flow.md`](03-protocol/topic-match-flow.md)
-18. [`07-project/collaboration.md`](07-project/collaboration.md)
+7. [`07-project/collaboration.md`](07-project/collaboration.md)
+
+## 专题导航
+
+### 基础与范围
+
+- [`00-foundation/vision.md`](00-foundation/vision.md)
+- [`00-foundation/scope.md`](00-foundation/scope.md)
+- [`00-foundation/compatibility.md`](00-foundation/compatibility.md)
+- [`00-foundation/glossary.md`](00-foundation/glossary.md)
+
+### 当前状态与路线图
+
+- [`01-status/current-status.md`](01-status/current-status.md)
+- [`01-status/mqtt5-feature-matrix.md`](01-status/mqtt5-feature-matrix.md)
+- [`01-status/milestones.md`](01-status/milestones.md)
+- [`01-status/m1-acceptance-checklist.md`](01-status/m1-acceptance-checklist.md)
+- [`01-status/m2-acceptance-checklist.md`](01-status/m2-acceptance-checklist.md)
+
+### 会话与可靠性
+
+- [`02-architecture/session-model.md`](02-architecture/session-model.md)
+- [`03-protocol/session-lifecycle.md`](03-protocol/session-lifecycle.md)
+- [`02-architecture/offline-message-model.md`](02-architecture/offline-message-model.md)
+- [`03-protocol/qos1-flow.md`](03-protocol/qos1-flow.md)
+
+### 消息语义
+
+- [`02-architecture/retained-message-model.md`](02-architecture/retained-message-model.md)
+- [`03-protocol/retain-flow.md`](03-protocol/retain-flow.md)
+- [`02-architecture/will-message-model.md`](02-architecture/will-message-model.md)
+- [`03-protocol/will-flow.md`](03-protocol/will-flow.md)
+- [`03-protocol/publish-flow.md`](03-protocol/publish-flow.md)
+
+### 路由与订阅
+
+- [`02-architecture/subscription-tree-model.md`](02-architecture/subscription-tree-model.md)
+- [`02-architecture/topic-routing.md`](02-architecture/topic-routing.md)
+- [`03-protocol/topic-match-flow.md`](03-protocol/topic-match-flow.md)
+- [`03-protocol/subscribe-flow.md`](03-protocol/subscribe-flow.md)
+
+### 协作规范与历史决策
+
+- [`07-project/collaboration.md`](07-project/collaboration.md)
+- [`07-project/decisions/0006-routing-concurrency-strategy.md`](07-project/decisions/0006-routing-concurrency-strategy.md)
+- [`07-project/decisions/`](07-project/decisions/)
 
 ## 目录说明
 

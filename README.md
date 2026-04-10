@@ -2,7 +2,7 @@
 
 `vxmq` 是一个使用 Java 实现的 MQTT Broker 项目，目标是在严格遵循 MQTT 协议的前提下，同时支持 MQTT 3.1.1 与 MQTT 5，并建立可持续演进的工程基础。
 
-当前仓库已完成 `M1 最小闭环`，具备单机 Broker 的最小可运行主链路，并已建立文档、测试和决策记录基础。当前阶段与能力边界统一查看 [`docs/01-status/current-status.md`](docs/01-status/current-status.md)。
+当前仓库已完成 `M1` 与 `M2`，已经具备单机、内存态 MQTT Broker 的可靠性基础版本。当前阶段、能力边界与下一步方向统一查看 [`docs/01-status/current-status.md`](docs/01-status/current-status.md)。
 
 ## 文档入口
 
@@ -16,6 +16,8 @@
 4. [`docs/01-status/current-status.md`](docs/01-status/current-status.md)
 5. [`docs/01-status/mqtt5-feature-matrix.md`](docs/01-status/mqtt5-feature-matrix.md)
 6. [`docs/02-architecture/architecture-overview.md`](docs/02-architecture/architecture-overview.md)
+7. [`docs/02-architecture/topic-routing.md`](docs/02-architecture/topic-routing.md)
+8. [`docs/07-project/decisions/0006-routing-concurrency-strategy.md`](docs/07-project/decisions/0006-routing-concurrency-strategy.md)
 7. [`docs/07-project/collaboration.md`](docs/07-project/collaboration.md)
 
 ## 开发运行
@@ -46,7 +48,7 @@ src/main/resources/application.yml
 
 ## 当前阶段
 
-项目当前处于：`M1 已完成，M2 尚未开始`
+项目当前处于：`M1 已完成，M2 已完成，准备进入 M3`
 
 当前已完成能力与后续规划请直接查看：
 
