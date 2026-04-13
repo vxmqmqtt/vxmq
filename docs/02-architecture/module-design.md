@@ -52,8 +52,9 @@
 职责：
 
 - 管理按 `clientId` 归属的会话视图
-- 当前已落地内容包括：绑定连接 ID、订阅集合
-- 为后续扩展 Session Expiry、inflight message、offline message 预留位置
+- 当前已落地内容包括：在线/离线会话切换、持久策略、会话过期时间、订阅集合
+- 作为订阅状态真相的所有者，回答“某个 clientId 当前拥有什么订阅状态”
+- 为后续扩展 inflight message、offline message 和更多 MQTT 5 状态预留位置
 
 ### `routing`
 
@@ -62,6 +63,7 @@
 - 管理订阅索引
 - 提供 Topic Filter 匹配与订阅查询
 - 支撑发布消息的命中集合解析
+- 作为匹配索引，回答“某个 Topic Name 当前命中了谁”
 
 ### `auth`
 
@@ -90,13 +92,27 @@
 - 生命周期状态
 - 当前活跃连接索引
 
+并发约束：
+
+- `transport / connection` 默认运行在 Vert.x event loop 串行上下文中
+- `ClientConnection` 以连接级轻量状态为主，优先依赖 event loop 顺序执行
+- 若需要让其他线程观察连接状态，则使用 `volatile` 提供可见性，而不是把连接对象设计成重同步共享容器
+
 ### 会话级状态
 
 由 `SessionRegistry` 持有：
 
 - `clientId`
 - 当前绑定连接 ID
+- 是否持久
+- 会话过期配置与到期时间
 - 当前订阅集合
+
+并发约束：
+
+- `session` 属于跨连接共享状态
+- 同一会话可能被 reconnect、离线恢复、PUBACK、懒清理等不同路径访问
+- 对离线队列、QoS inflight、packet id 分配和 will 这类复合可变状态，允许使用显式同步保证原子性和一致性
 
 ### 路由级状态
 
@@ -104,6 +120,12 @@
 
 - Topic Filter 到订阅绑定的索引
 - Topic Name 命中结果
+- 由会话真相派生出的匹配视图，而不是订阅状态的唯一真相
+
+并发约束：
+
+- `routing` 是索引层，不强制绑定到 `transport / connection` 或 `session` 的同步策略
+- 它按索引结构自身的读写模式选择并发控制方式，但不能反过来定义会话真相
 
 ## 调用方向
 

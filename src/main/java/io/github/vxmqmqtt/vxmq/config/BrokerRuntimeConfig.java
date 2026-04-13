@@ -38,4 +38,10 @@ public interface BrokerRuntimeConfig {
      */
     @WithDefault("10")
     int timeoutOnConnectSeconds();
+
+    /**
+     * Maximum number of offline QoS 1 messages retained per persistent session.
+     */
+    @WithDefault("1024")
+    int offlineQueueCapacityPerSession();
 }

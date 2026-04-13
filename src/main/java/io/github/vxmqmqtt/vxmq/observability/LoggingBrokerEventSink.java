@@ -25,7 +25,7 @@ public class LoggingBrokerEventSink implements BrokerEventSink {
     @Override
     public void connectionAccepted(ClientConnection connection) {
         LOG.infov("Accepted MQTT connection id={0}, clientId={1}, remote={2}",
-                connection.internalId(),
+                connection.connectionId(),
                 connection.effectiveClientId(),
                 connection.remoteAddress());
     }
@@ -59,7 +59,7 @@ public class LoggingBrokerEventSink implements BrokerEventSink {
             return;
         }
         LOG.warnv("Protocol warning id={0}, clientId={1}: {2}",
-                connection.internalId(),
+                connection.connectionId(),
                 connection.effectiveClientId(),
                 message);
     }

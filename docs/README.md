@@ -6,7 +6,9 @@
 - `当前状态`：集中承载项目目前进行到哪里
 - `历史记录`：ADR、阶段验收等不可替代的留痕文档
 
-## 推荐阅读顺序
+## 首次阅读建议
+
+第一次进入项目时，建议先看这几份：
 
 1. [`00-foundation/vision.md`](00-foundation/vision.md)
 2. [`00-foundation/scope.md`](00-foundation/scope.md)
@@ -14,8 +16,52 @@
 4. [`01-status/current-status.md`](01-status/current-status.md)
 5. [`01-status/mqtt5-feature-matrix.md`](01-status/mqtt5-feature-matrix.md)
 6. [`02-architecture/architecture-overview.md`](02-architecture/architecture-overview.md)
-7. [`03-protocol/connect-flow.md`](03-protocol/connect-flow.md)
-8. [`07-project/collaboration.md`](07-project/collaboration.md)
+7. [`07-project/collaboration.md`](07-project/collaboration.md)
+
+## 专题导航
+
+### 基础与范围
+
+- [`00-foundation/vision.md`](00-foundation/vision.md)
+- [`00-foundation/scope.md`](00-foundation/scope.md)
+- [`00-foundation/compatibility.md`](00-foundation/compatibility.md)
+- [`00-foundation/glossary.md`](00-foundation/glossary.md)
+
+### 当前状态与路线图
+
+- [`01-status/current-status.md`](01-status/current-status.md)
+- [`01-status/mqtt5-feature-matrix.md`](01-status/mqtt5-feature-matrix.md)
+- [`01-status/milestones.md`](01-status/milestones.md)
+- [`01-status/m1-acceptance-checklist.md`](01-status/m1-acceptance-checklist.md)
+- [`01-status/m2-acceptance-checklist.md`](01-status/m2-acceptance-checklist.md)
+
+### 会话与可靠性
+
+- [`02-architecture/session-model.md`](02-architecture/session-model.md)
+- [`03-protocol/session-lifecycle.md`](03-protocol/session-lifecycle.md)
+- [`02-architecture/offline-message-model.md`](02-architecture/offline-message-model.md)
+- [`03-protocol/qos1-flow.md`](03-protocol/qos1-flow.md)
+
+### 消息语义
+
+- [`02-architecture/retained-message-model.md`](02-architecture/retained-message-model.md)
+- [`03-protocol/retain-flow.md`](03-protocol/retain-flow.md)
+- [`02-architecture/will-message-model.md`](02-architecture/will-message-model.md)
+- [`03-protocol/will-flow.md`](03-protocol/will-flow.md)
+- [`03-protocol/publish-flow.md`](03-protocol/publish-flow.md)
+
+### 路由与订阅
+
+- [`02-architecture/subscription-tree-model.md`](02-architecture/subscription-tree-model.md)
+- [`02-architecture/topic-routing.md`](02-architecture/topic-routing.md)
+- [`03-protocol/topic-match-flow.md`](03-protocol/topic-match-flow.md)
+- [`03-protocol/subscribe-flow.md`](03-protocol/subscribe-flow.md)
+
+### 协作规范与历史决策
+
+- [`07-project/collaboration.md`](07-project/collaboration.md)
+- [`07-project/decisions/0006-routing-concurrency-strategy.md`](07-project/decisions/0006-routing-concurrency-strategy.md)
+- [`07-project/decisions/`](07-project/decisions/)
 
 ## 目录说明
 
@@ -39,11 +85,11 @@
 
 ### `02-architecture`
 
-系统整体架构、模块边界和 Topic 路由设计。
+系统整体架构、模块边界、会话模型、离线消息模型、Retained Message 模型、Will Message 模型、订阅树模型和 Topic 路由设计。
 
 ### `03-protocol`
 
-Broker 对 CONNECT、SUBSCRIBE / UNSUBSCRIBE、PUBLISH 的长期协议行为说明。
+Broker 对 CONNECT、会话生命周期、QoS 1、Retained Message、Will Message、Topic 匹配、SUBSCRIBE / UNSUBSCRIBE、PUBLISH 的长期协议行为说明。
 
 ### `07-project`
 
@@ -54,3 +100,4 @@ Broker 对 CONNECT、SUBSCRIBE / UNSUBSCRIBE、PUBLISH 的长期协议行为说�
 - 当前状态只在 `01-status/` 集中维护，其他设计文档不重复写阶段总结。
 - 设计文档优先追求长期稳定，不承载短期任务清单。
 - 重要实现选择进入 `07-project/decisions/`。
+- 性能/并发评估代码作为独立评估套件维护，不进入默认 `./mvnw test` 回归路径；routing 写路径评估需区分单次 churn 与整批 snapshot 重建。

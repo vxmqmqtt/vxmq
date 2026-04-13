@@ -4,61 +4,87 @@ import jakarta.enterprise.context.ApplicationScoped;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * In-memory subscription index used by the single-node milestone.
+ * In-memory subscription index backed by a copy-on-write subscription tree snapshot.
  */
 @ApplicationScoped
 public class InMemorySubscriptionRegistry implements SubscriptionRegistry {
 
-    private final Map<String, Set<SubscriptionBinding>> subscriptionsByFilter = new ConcurrentHashMap<>();
-    private final TopicMatcher topicMatcher;
+    private final AtomicReference<ImmutableSubscriptionTreeNode> root =
+            new AtomicReference<>(ImmutableSubscriptionTreeNode.empty());
+    private final MqttTopicSupport mqttTopicSupport;
 
-    public InMemorySubscriptionRegistry(TopicMatcher topicMatcher) {
-        this.topicMatcher = topicMatcher;
+    public InMemorySubscriptionRegistry(MqttTopicSupport mqttTopicSupport) {
+        this.mqttTopicSupport = mqttTopicSupport;
     }
 
     @Override
     public void addSubscription(SubscriptionBinding subscriptionBinding) {
-        // Keep only one binding per client and filter so later subscriptions replace earlier ones.
-        subscriptionsByFilter
-                .computeIfAbsent(subscriptionBinding.topicFilter(), ignored -> ConcurrentHashMap.newKeySet())
-                .removeIf(binding -> binding.clientId().equals(subscriptionBinding.clientId()));
-        subscriptionsByFilter
-                .computeIfAbsent(subscriptionBinding.topicFilter(), ignored -> ConcurrentHashMap.newKeySet())
-                .add(subscriptionBinding);
+        if (!mqttTopicSupport.isValidFilter(subscriptionBinding.topicFilter())) {
+            throw new IllegalArgumentException("Invalid topic filter: " + subscriptionBinding.topicFilter());
+        }
+
+        String[] levels = levels(subscriptionBinding.topicFilter());
+        while (true) {
+            ImmutableSubscriptionTreeNode current = root.get();
+            ImmutableSubscriptionTreeNode updated = current.add(levels, 0, subscriptionBinding);
+            if (root.compareAndSet(current, updated)) {
+                return;
+            }
+        }
     }
 
     @Override
     public boolean removeSubscription(String clientId, String topicFilter) {
-        Set<SubscriptionBinding> bindings = subscriptionsByFilter.get(topicFilter);
-        if (bindings == null) {
+        if (!mqttTopicSupport.isValidFilter(topicFilter)) {
             return false;
         }
 
-        boolean removed = bindings.removeIf(binding -> binding.clientId().equals(clientId));
-        if (bindings.isEmpty()) {
-            subscriptionsByFilter.remove(topicFilter);
+        String[] levels = levels(topicFilter);
+        while (true) {
+            ImmutableSubscriptionTreeNode current = root.get();
+            ImmutableSubscriptionTreeNode.RemoveResult removed = current.remove(levels, 0, clientId);
+            if (!removed.removed()) {
+                return false;
+            }
+            if (root.compareAndSet(current, removed.node())) {
+                return true;
+            }
         }
-        return removed;
     }
 
     @Override
     public Collection<SubscriptionBinding> match(String topicName) {
-        Map<String, SubscriptionBinding> deduplicated = new LinkedHashMap<>();
-        for (Map.Entry<String, Set<SubscriptionBinding>> entry : subscriptionsByFilter.entrySet()) {
-            if (!topicMatcher.matches(entry.getKey(), topicName)) {
-                continue;
-            }
-            for (SubscriptionBinding binding : entry.getValue()) {
-                // When overlapping filters match the same client, keep a single delivery target.
-                deduplicated.merge(binding.clientId(), binding, (left, right) ->
-                        left.requestedQos() >= right.requestedQos() ? left : right);
-            }
+        if (!mqttTopicSupport.isValidTopicName(topicName)) {
+            return List.of();
         }
+
+        Map<String, SubscriptionBinding> deduplicated = new LinkedHashMap<>();
+        root.get().match(levels(topicName), 0, deduplicated);
         return new ArrayList<>(deduplicated.values());
+    }
+
+    /**
+     * Rebuilds the entire routing snapshot from an authoritative binding set in one publication step.
+     */
+    void replaceAllSubscriptions(Collection<SubscriptionBinding> bindings) {
+        MutableSubscriptionTreeBuilder builder = new MutableSubscriptionTreeBuilder(mqttTopicSupport);
+        builder.addAll(bindings);
+        root.set(builder.build());
+    }
+
+    /**
+     * Exposes the current tree node count for pruning-oriented tests.
+     */
+    int nodeCount() {
+        return root.get().nodeCount();
+    }
+
+    private String[] levels(String topic) {
+        return topic.split("/", -1);
     }
 }

@@ -1,9 +1,9 @@
 package io.github.vxmqmqtt.vxmq.routing;
 
 /**
- * Validates and matches MQTT topic names and topic filters.
+ * Provides reusable MQTT topic-name and topic-filter rules for validation and helper matching.
  */
-public interface TopicMatcher {
+public interface MqttTopicSupport {
 
     /**
      * Returns whether the supplied topic filter is valid for subscriptions.

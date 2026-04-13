@@ -55,26 +55,27 @@ Topic Filter 与 Topic Name 各层级完全相同则匹配。
 
 ## 当前数据结构
 
-当前实现采用内存态订阅索引，优先保证语义正确与代码清晰。
+当前实现采用内存态订阅树索引：
 
 - `session` 视图回答“某个 clientId 订阅了什么”
 - `routing` 视图回答“某个 Topic Name 命中了谁”
+- 订阅状态的真相在 `session`，`routing` 只是为匹配和投递服务的派生索引
 
-这种双视图设计允许订阅更新和消息查找分别按最自然的方向组织。
+当前订阅树模型见 [`subscription-tree-model.md`](subscription-tree-model.md)。
 
 ## 更新与查询规则
 
 ### 订阅注册
 
 1. 校验 Topic Filter
-2. 先更新 `session`
-3. 再更新 `routing`
+2. 先更新 `session`，因为订阅真相属于会话
+3. 再更新 `routing`，因为路由索引可由会话状态派生
 4. 若路由更新失败，回滚会话更新
 
 ### 取消订阅
 
 1. 校验 Topic Filter
-2. 同步清理 `session` 与 `routing`
+2. 先清理 `session`，再同步清理 `routing`
 3. 若两侧都不存在，按协议版本返回对应结果
 
 ### 发布查找
@@ -86,12 +87,17 @@ Topic Filter 与 Topic Name 各层级完全相同则匹配。
 
 ## 当前实现说明
 
-- 当前实现采用内存态订阅索引，优先保证语义正确与代码清晰。
+- 当前实现采用内存态订阅树索引，匹配复杂度不再依赖“扫描所有 filter”。
+- 当前主线采用 `snapshot / copy-on-write` 订阅树：读路径读取一次根快照后在不可变树上遍历，写路径通过路径复制和根替换发布新快照。
+- 当前主线已进一步加入两项写路径优化：更紧凑的不可变 child / binding 容器，以及内部 batch snapshot builder，用于降低小节点复制成本并支持整批重建。
+- 会话删除时必须同步清理路由索引，避免派生索引残留导致消息被错误投递。
 - 同一客户端的重叠订阅在当前实现中只投递一次，相关决策见 [`../07-project/decisions/0003-m1-overlapping-subscription-delivery.md`](../07-project/decisions/0003-m1-overlapping-subscription-delivery.md)。
 - Shared Subscription 仍未进入当前实现范围，因此路由结果当前不携带共享组语义。
+- 并发安全策略的原型评估已完成，相关结论见 [`../07-project/decisions/0006-routing-concurrency-strategy.md`](../07-project/decisions/0006-routing-concurrency-strategy.md)。
+- 评估候选与 benchmark harness 作为独立评估套件保留，不进入默认回归路径；评估时应区分单次写 churn 与整批 snapshot 重建两类成本。
 
 ## 演进方向
 
-- 若后续 Topic Filter 数量增长，索引结构可从当前实现演进为更高效的树形结构。
 - 若后续引入 Shared Subscription，路由结果需要显式携带共享组信息。
 - 若后续引入 Retained Message，路由层仍只负责匹配，不直接负责保留消息存储。
+- 并发读写安全的主线方向已经定为 `snapshot / copy-on-write`，而不是将 routing 直接收敛为 single-owner Verticle。

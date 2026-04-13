@@ -3,10 +3,10 @@ package io.github.vxmqmqtt.vxmq.routing;
 import jakarta.enterprise.context.ApplicationScoped;
 
 /**
- * Minimal MQTT topic matcher covering wildcard validation and matching rules for M1.
+ * Default MQTT topic support used for topic validation and helper rule checks.
  */
 @ApplicationScoped
-public class DefaultTopicMatcher implements TopicMatcher {
+public class DefaultMqttTopicSupport implements MqttTopicSupport {
 
     @Override
     public boolean isValidFilter(String topicFilter) {

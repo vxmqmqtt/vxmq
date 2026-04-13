@@ -9,7 +9,8 @@ import io.github.vxmqmqtt.vxmq.auth.PermitAllAuthProvider;
 import io.github.vxmqmqtt.vxmq.config.BrokerRuntimeConfig;
 import io.github.vxmqmqtt.vxmq.observability.BrokerEventSink;
 import io.github.vxmqmqtt.vxmq.protocol.DefaultProtocolEngine;
-import io.github.vxmqmqtt.vxmq.routing.DefaultTopicMatcher;
+import io.github.vxmqmqtt.vxmq.retained.InMemoryRetainedMessageRegistry;
+import io.github.vxmqmqtt.vxmq.routing.DefaultMqttTopicSupport;
 import io.github.vxmqmqtt.vxmq.routing.InMemorySubscriptionRegistry;
 import io.github.vxmqmqtt.vxmq.session.InMemorySessionRegistry;
 import io.github.vxmqmqtt.vxmq.transport.ClientConnection;
@@ -23,6 +24,8 @@ import io.vertx.mutiny.core.Vertx;
 import io.vertx.mutiny.core.buffer.Buffer;
 import io.vertx.mutiny.mqtt.MqttClient;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -78,6 +81,221 @@ class VertxMqttBrokerTransportIntegrationTest {
         assertEquals("payload", receivedPayload.get(5, TimeUnit.SECONDS));
     }
 
+    // Verifies the online QoS 1 path: publish, subscriber receives, and subscriber acknowledges.
+    @Test
+    void shouldDeliverAndAcknowledgeQos1MessageToOnlineSubscriber() throws Exception {
+        int port = startBroker();
+        CompletableFuture<String> receivedPayload = new CompletableFuture<>();
+
+        subscriber = mqttClient("subscriber-qos1-online");
+        subscriber.publishHandler(message ->
+                receivedPayload.complete(message.payload().toString(StandardCharsets.UTF_8)));
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, subscriber.connect(port, "127.0.0.1").await().indefinitely().code());
+        subscriber.subscribe("sensors/+/temperature", 1).await().indefinitely();
+
+        publisher = mqttClient("publisher-qos1-online");
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, publisher.connect(port, "127.0.0.1").await().indefinitely().code());
+        publisher.publish(
+                "sensors/room-1/temperature",
+                Buffer.buffer("payload-qos1"),
+                MqttQoS.AT_LEAST_ONCE,
+                false,
+                false).await().indefinitely();
+
+        assertEquals("payload-qos1", receivedPayload.get(5, TimeUnit.SECONDS));
+    }
+
+    // Verifies that retained messages are sent immediately after SUBACK when a new subscriber matches them.
+    @Test
+    void shouldReplayRetainedMessageAfterSubscribe() throws Exception {
+        int port = startBroker();
+        CompletableFuture<String> receivedPayload = new CompletableFuture<>();
+
+        publisher = mqttClient("publisher-retained");
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, publisher.connect(port, "127.0.0.1").await().indefinitely().code());
+        publisher.publish(
+                "sensors/room-1/temperature",
+                Buffer.buffer("retained-payload"),
+                MqttQoS.AT_MOST_ONCE,
+                false,
+                true).await().indefinitely();
+
+        subscriber = mqttClient("subscriber-retained");
+        subscriber.publishHandler(message ->
+                receivedPayload.complete(message.payload().toString(StandardCharsets.UTF_8)));
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, subscriber.connect(port, "127.0.0.1").await().indefinitely().code());
+        subscriber.subscribe("sensors/+/temperature", 0).await().indefinitely();
+
+        assertEquals("retained-payload", receivedPayload.get(5, TimeUnit.SECONDS));
+    }
+
+    // Verifies that clearing a retained message prevents later subscribers from receiving it.
+    @Test
+    void shouldNotReplayRetainedMessageAfterItIsCleared() throws Exception {
+        int port = startBroker();
+        CompletableFuture<String> receivedPayload = new CompletableFuture<>();
+
+        publisher = mqttClient("publisher-retained-clear");
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, publisher.connect(port, "127.0.0.1").await().indefinitely().code());
+        publisher.publish(
+                "sensors/room-1/temperature",
+                Buffer.buffer("retained-payload"),
+                MqttQoS.AT_MOST_ONCE,
+                false,
+                true).await().indefinitely();
+        publisher.publish(
+                "sensors/room-1/temperature",
+                Buffer.buffer(),
+                MqttQoS.AT_MOST_ONCE,
+                false,
+                true).await().indefinitely();
+
+        subscriber = mqttClient("subscriber-retained-clear");
+        subscriber.publishHandler(message ->
+                receivedPayload.complete(message.payload().toString(StandardCharsets.UTF_8)));
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, subscriber.connect(port, "127.0.0.1").await().indefinitely().code());
+        subscriber.subscribe("sensors/+/temperature", 0).await().indefinitely();
+
+        assertThrows(TimeoutException.class, () -> receivedPayload.get(1, TimeUnit.SECONDS));
+    }
+
+    // Verifies that retained QoS 1 messages are replayed through the existing QoS 1 publish path.
+    @Test
+    void shouldReplayRetainedQos1MessageWithAcknowledgement() throws Exception {
+        int port = startBroker();
+        CompletableFuture<String> receivedPayload = new CompletableFuture<>();
+
+        publisher = mqttClient("publisher-retained-qos1");
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, publisher.connect(port, "127.0.0.1").await().indefinitely().code());
+        publisher.publish(
+                "sensors/room-1/temperature",
+                Buffer.buffer("retained-qos1-payload"),
+                MqttQoS.AT_LEAST_ONCE,
+                false,
+                true).await().indefinitely();
+
+        subscriber = mqttClient("subscriber-retained-qos1");
+        subscriber.publishHandler(message ->
+                receivedPayload.complete(message.payload().toString(StandardCharsets.UTF_8)));
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, subscriber.connect(port, "127.0.0.1").await().indefinitely().code());
+        subscriber.subscribe("sensors/+/temperature", 1).await().indefinitely();
+
+        assertEquals("retained-qos1-payload", receivedPayload.get(5, TimeUnit.SECONDS));
+    }
+
+    // Verifies that a keep-alive timeout is treated as an abnormal close and publishes the configured will message.
+    @Test
+    void shouldPublishWillAfterKeepAliveTimeout() throws Exception {
+        int port = startBroker();
+        CompletableFuture<String> receivedPayload = new CompletableFuture<>();
+
+        subscriber = mqttClient("subscriber-will-timeout");
+        subscriber.publishHandler(message ->
+                receivedPayload.complete(message.payload().toString(StandardCharsets.UTF_8)));
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, subscriber.connect(port, "127.0.0.1").await().indefinitely().code());
+        subscriber.subscribe("status/+", 0).await().indefinitely();
+
+        publisher = mqttClientWithWill(
+                "publisher-will-timeout",
+                true,
+                1,
+                false,
+                "status/publisher-will-timeout",
+                "offline",
+                MqttQoS.AT_MOST_ONCE,
+                false);
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, publisher.connect(port, "127.0.0.1").await().indefinitely().code());
+
+        assertEquals("offline", receivedPayload.get(5, TimeUnit.SECONDS));
+    }
+
+    // Verifies that an explicit MQTT DISCONNECT suppresses the configured will message.
+    @Test
+    void shouldNotPublishWillAfterExplicitDisconnect() throws Exception {
+        int port = startBroker();
+        CompletableFuture<String> receivedPayload = new CompletableFuture<>();
+
+        subscriber = mqttClient("subscriber-will-disconnect");
+        subscriber.publishHandler(message ->
+                receivedPayload.complete(message.payload().toString(StandardCharsets.UTF_8)));
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, subscriber.connect(port, "127.0.0.1").await().indefinitely().code());
+        subscriber.subscribe("status/+", 0).await().indefinitely();
+
+        publisher = mqttClientWithWill(
+                "publisher-will-disconnect",
+                true,
+                20,
+                true,
+                "status/publisher-will-disconnect",
+                "offline",
+                MqttQoS.AT_MOST_ONCE,
+                false);
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, publisher.connect(port, "127.0.0.1").await().indefinitely().code());
+        publisher.disconnect().await().indefinitely();
+
+        assertThrows(TimeoutException.class, () -> receivedPayload.get(1, TimeUnit.SECONDS));
+    }
+
+    // Verifies that session takeover closes the old connection abnormally and therefore publishes its will.
+    @Test
+    void shouldPublishWillWhenClientSessionIsTakenOver() throws Exception {
+        int port = startBroker();
+        CompletableFuture<String> receivedPayload = new CompletableFuture<>();
+
+        subscriber = mqttClient("subscriber-will-takeover");
+        subscriber.publishHandler(message ->
+                receivedPayload.complete(message.payload().toString(StandardCharsets.UTF_8)));
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, subscriber.connect(port, "127.0.0.1").await().indefinitely().code());
+        subscriber.subscribe("status/+", 0).await().indefinitely();
+
+        publisher = mqttClientWithWill(
+                "publisher-will-takeover",
+                true,
+                20,
+                true,
+                "status/publisher-will-takeover",
+                "offline",
+                MqttQoS.AT_MOST_ONCE,
+                false);
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, publisher.connect(port, "127.0.0.1").await().indefinitely().code());
+
+        duplicateClient = mqttClient("publisher-will-takeover");
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, duplicateClient.connect(port, "127.0.0.1").await().indefinitely().code());
+
+        assertEquals("offline", receivedPayload.get(5, TimeUnit.SECONDS));
+    }
+
+    // Verifies that a retained will is stored and replayed to later subscribers after the publisher dies abnormally.
+    @Test
+    void shouldReplayRetainedWillToLaterSubscriber() throws Exception {
+        int port = startBroker();
+        CompletableFuture<String> receivedPayload = new CompletableFuture<>();
+        CompletableFuture<Void> closed = new CompletableFuture<>();
+
+        publisher = mqttClientWithWill(
+                "publisher-retained-will",
+                true,
+                1,
+                false,
+                "status/publisher-retained-will",
+                "offline",
+                MqttQoS.AT_MOST_ONCE,
+                true);
+        publisher.closeHandler(() -> closed.complete(null));
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, publisher.connect(port, "127.0.0.1").await().indefinitely().code());
+
+        // Wait until the broker closes the client and publishes the retained will.
+        closed.get(5, TimeUnit.SECONDS);
+
+        subscriber = mqttClient("subscriber-retained-will");
+        subscriber.publishHandler(message ->
+                receivedPayload.complete(message.payload().toString(StandardCharsets.UTF_8)));
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, subscriber.connect(port, "127.0.0.1").await().indefinitely().code());
+        subscriber.subscribe("status/+", 0).await().indefinitely();
+
+        assertEquals("offline", receivedPayload.get(5, TimeUnit.SECONDS));
+    }
+
     // Verifies that a second connection with the same client id causes the old connection to close.
     @Test
     void shouldClosePreviousConnectionWhenClientIdIsTakenOver() throws ExecutionException, InterruptedException, TimeoutException {
@@ -93,6 +311,152 @@ class VertxMqttBrokerTransportIntegrationTest {
 
         oldConnectionClosed.get(5, TimeUnit.SECONDS);
         assertTrue(duplicateClient.isConnected());
+    }
+
+    // Verifies that a persistent MQTT 3.1.1 session restores its subscriptions after reconnect.
+    @Test
+    void shouldRestorePersistentSessionSubscriptionsAfterReconnect() throws Exception {
+        int port = startBroker();
+        CompletableFuture<String> receivedPayload = new CompletableFuture<>();
+
+        subscriber = mqttClient("persistent-subscriber", false);
+        assertFalse(subscriber.connect(port, "127.0.0.1").await().indefinitely().isSessionPresent());
+        subscriber.subscribe("sensors/+/temperature", 0).await().indefinitely();
+        subscriber.disconnect().await().indefinitely();
+
+        subscriber = mqttClient("persistent-subscriber", false);
+        subscriber.publishHandler(message ->
+                receivedPayload.complete(message.payload().toString(StandardCharsets.UTF_8)));
+        assertTrue(subscriber.connect(port, "127.0.0.1").await().indefinitely().isSessionPresent());
+
+        publisher = mqttClient("persistent-publisher");
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, publisher.connect(port, "127.0.0.1").await().indefinitely().code());
+        publisher.publish(
+                "sensors/room-1/temperature",
+                Buffer.buffer("persistent-payload"),
+                MqttQoS.AT_MOST_ONCE,
+                false,
+                false).await().indefinitely();
+
+        assertEquals("persistent-payload", receivedPayload.get(5, TimeUnit.SECONDS));
+    }
+
+    // Verifies that a persistent session receives queued QoS 1 messages after reconnecting.
+    @Test
+    void shouldRestoreQueuedQos1MessageAfterReconnect() throws Exception {
+        int port = startBroker();
+        CompletableFuture<String> receivedPayload = new CompletableFuture<>();
+
+        subscriber = mqttClient("persistent-qos1-subscriber", false);
+        assertFalse(subscriber.connect(port, "127.0.0.1").await().indefinitely().isSessionPresent());
+        subscriber.subscribe("sensors/+/temperature", 1).await().indefinitely();
+        subscriber.disconnect().await().indefinitely();
+
+        publisher = mqttClient("persistent-qos1-publisher");
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, publisher.connect(port, "127.0.0.1").await().indefinitely().code());
+        publisher.publish(
+                "sensors/room-1/temperature",
+                Buffer.buffer("offline-qos1-payload"),
+                MqttQoS.AT_LEAST_ONCE,
+                false,
+                false).await().indefinitely();
+
+        subscriber = mqttClient("persistent-qos1-subscriber", false);
+        subscriber.publishHandler(message ->
+                receivedPayload.complete(message.payload().toString(StandardCharsets.UTF_8)));
+        assertTrue(subscriber.connect(port, "127.0.0.1").await().indefinitely().isSessionPresent());
+
+        assertEquals("offline-qos1-payload", receivedPayload.get(5, TimeUnit.SECONDS));
+    }
+
+    // Verifies that offline clean sessions do not receive queued QoS 1 messages after reconnect.
+    @Test
+    void shouldNotRestoreQueuedQos1MessageForCleanSession() throws Exception {
+        int port = startBroker();
+        CompletableFuture<String> receivedPayload = new CompletableFuture<>();
+
+        subscriber = mqttClient("clean-qos1-subscriber", true);
+        assertFalse(subscriber.connect(port, "127.0.0.1").await().indefinitely().isSessionPresent());
+        subscriber.subscribe("sensors/+/temperature", 1).await().indefinitely();
+        subscriber.disconnect().await().indefinitely();
+
+        publisher = mqttClient("clean-qos1-publisher");
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, publisher.connect(port, "127.0.0.1").await().indefinitely().code());
+        publisher.publish(
+                "sensors/room-1/temperature",
+                Buffer.buffer("clean-qos1-payload"),
+                MqttQoS.AT_LEAST_ONCE,
+                false,
+                false).await().indefinitely();
+
+        subscriber = mqttClient("clean-qos1-subscriber", true);
+        subscriber.publishHandler(message ->
+                receivedPayload.complete(message.payload().toString(StandardCharsets.UTF_8)));
+        assertFalse(subscriber.connect(port, "127.0.0.1").await().indefinitely().isSessionPresent());
+
+        assertThrows(TimeoutException.class, () -> receivedPayload.get(1, TimeUnit.SECONDS));
+    }
+
+    // Verifies that the offline queue drops the oldest QoS 1 message when the configured capacity is exceeded.
+    @Test
+    void shouldDropOldestQueuedQos1MessageWhenOfflineQueueIsFull() throws Exception {
+        int port = startBroker(2);
+        List<String> receivedPayloads = new ArrayList<>();
+        CompletableFuture<Void> enoughMessages = new CompletableFuture<>();
+
+        subscriber = mqttClient("bounded-qos1-subscriber", false);
+        assertFalse(subscriber.connect(port, "127.0.0.1").await().indefinitely().isSessionPresent());
+        subscriber.subscribe("sensors/+/temperature", 1).await().indefinitely();
+        subscriber.disconnect().await().indefinitely();
+
+        publisher = mqttClient("bounded-qos1-publisher");
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, publisher.connect(port, "127.0.0.1").await().indefinitely().code());
+        publisher.publish("sensors/room-1/temperature", Buffer.buffer("first"), MqttQoS.AT_LEAST_ONCE, false, false)
+                .await().indefinitely();
+        publisher.publish("sensors/room-1/temperature", Buffer.buffer("second"), MqttQoS.AT_LEAST_ONCE, false, false)
+                .await().indefinitely();
+        publisher.publish("sensors/room-1/temperature", Buffer.buffer("third"), MqttQoS.AT_LEAST_ONCE, false, false)
+                .await().indefinitely();
+
+        subscriber = mqttClient("bounded-qos1-subscriber", false);
+        subscriber.publishHandler(message -> {
+            receivedPayloads.add(message.payload().toString(StandardCharsets.UTF_8));
+            if (receivedPayloads.size() == 2) {
+                enoughMessages.complete(null);
+            }
+        });
+        assertTrue(subscriber.connect(port, "127.0.0.1").await().indefinitely().isSessionPresent());
+
+        enoughMessages.get(5, TimeUnit.SECONDS);
+        assertEquals(List.of("second", "third"), receivedPayloads);
+    }
+
+    // Verifies that a clean MQTT 3.1.1 session discards subscriptions when the client reconnects.
+    @Test
+    void shouldDiscardCleanSessionSubscriptionsAfterReconnect() throws Exception {
+        int port = startBroker();
+        CompletableFuture<String> receivedPayload = new CompletableFuture<>();
+
+        subscriber = mqttClient("clean-subscriber", true);
+        assertFalse(subscriber.connect(port, "127.0.0.1").await().indefinitely().isSessionPresent());
+        subscriber.subscribe("sensors/+/temperature", 0).await().indefinitely();
+        subscriber.disconnect().await().indefinitely();
+
+        subscriber = mqttClient("clean-subscriber", true);
+        subscriber.publishHandler(message ->
+                receivedPayload.complete(message.payload().toString(StandardCharsets.UTF_8)));
+        assertFalse(subscriber.connect(port, "127.0.0.1").await().indefinitely().isSessionPresent());
+
+        publisher = mqttClient("clean-publisher");
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, publisher.connect(port, "127.0.0.1").await().indefinitely().code());
+        publisher.publish(
+                "sensors/room-1/temperature",
+                Buffer.buffer("clean-payload"),
+                MqttQoS.AT_MOST_ONCE,
+                false,
+                false).await().indefinitely();
+
+        assertThrows(TimeoutException.class, () -> receivedPayload.get(1, TimeUnit.SECONDS));
     }
 
     // Verifies that unsubscribing removes the delivery path and later publishes no longer arrive.
@@ -136,18 +500,18 @@ class VertxMqttBrokerTransportIntegrationTest {
 
     // Verifies that an unsupported inbound QoS triggers an abnormal disconnect.
     @Test
-    void shouldCloseClientAfterUnsupportedQos1Publish() throws Exception {
+    void shouldCloseClientAfterUnsupportedQos2Publish() throws Exception {
         int port = startBroker();
         CompletableFuture<Void> publisherClosed = new CompletableFuture<>();
 
-        publisher = mqttClient("publisher-qos1");
+        publisher = mqttClient("publisher-qos2");
         publisher.closeHandler(() -> publisherClosed.complete(null));
         assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, publisher.connect(port, "127.0.0.1").await().indefinitely().code());
 
         publisher.publish(
                 "sensors/room-1/temperature",
-                Buffer.buffer("payload-qos1"),
-                MqttQoS.AT_LEAST_ONCE,
+                Buffer.buffer("payload-qos2"),
+                MqttQoS.EXACTLY_ONCE,
                 false,
                 false).await().indefinitely();
 
@@ -156,17 +520,22 @@ class VertxMqttBrokerTransportIntegrationTest {
     }
 
     private int startBroker() {
+        return startBroker(1024);
+    }
+
+    private int startBroker(int offlineQueueCapacityPerSession) {
         vertx = Vertx.vertx();
-        DefaultTopicMatcher topicMatcher = new DefaultTopicMatcher();
+        DefaultMqttTopicSupport mqttTopicSupport = new DefaultMqttTopicSupport();
         ClientConnectionRegistry connectionRegistry = new ClientConnectionRegistry();
         transport = new VertxMqttBrokerTransport(
                 vertx,
-                new TestBrokerRuntimeConfig(),
+                new TestBrokerRuntimeConfig(offlineQueueCapacityPerSession),
                 new DefaultProtocolEngine(
                         new PermitAllAuthProvider(),
-                        new InMemorySessionRegistry(),
-                        new InMemorySubscriptionRegistry(topicMatcher),
-                        topicMatcher,
+                        new InMemorySessionRegistry(offlineQueueCapacityPerSession),
+                        new InMemoryRetainedMessageRegistry(mqttTopicSupport),
+                        new InMemorySubscriptionRegistry(mqttTopicSupport),
+                        mqttTopicSupport,
                         new NoOpBrokerEventSink(),
                         connectionRegistry),
                 connectionRegistry,
@@ -179,13 +548,48 @@ class VertxMqttBrokerTransportIntegrationTest {
         return mqttClient(clientId, 20, true);
     }
 
+    private MqttClient mqttClient(String clientId, boolean cleanSession) {
+        return mqttClient(clientId, cleanSession, 20, true);
+    }
+
     private MqttClient mqttClient(String clientId, int keepAliveIntervalSeconds, boolean autoKeepAlive) {
+        return mqttClient(clientId, true, keepAliveIntervalSeconds, autoKeepAlive);
+    }
+
+    private MqttClient mqttClient(
+            String clientId,
+            boolean cleanSession,
+            int keepAliveIntervalSeconds,
+            boolean autoKeepAlive) {
         MqttClientOptions options = new MqttClientOptions()
                 .setAutoGeneratedClientId(false)
                 .setClientId(clientId)
-                .setCleanSession(true)
+                .setCleanSession(cleanSession)
                 .setKeepAliveInterval(keepAliveIntervalSeconds)
                 .setAutoKeepAlive(autoKeepAlive);
+        return MqttClient.create(vertx, options);
+    }
+
+    private MqttClient mqttClientWithWill(
+            String clientId,
+            boolean cleanSession,
+            int keepAliveIntervalSeconds,
+            boolean autoKeepAlive,
+            String willTopic,
+            String willPayload,
+            MqttQoS willQos,
+            boolean willRetain) {
+        MqttClientOptions options = new MqttClientOptions()
+                .setAutoGeneratedClientId(false)
+                .setClientId(clientId)
+                .setCleanSession(cleanSession)
+                .setKeepAliveInterval(keepAliveIntervalSeconds)
+                .setAutoKeepAlive(autoKeepAlive)
+                .setWillFlag(true)
+                .setWillTopic(willTopic)
+                .setWillMessage(willPayload)
+                .setWillQoS(willQos.value())
+                .setWillRetain(willRetain);
         return MqttClient.create(vertx, options);
     }
 
@@ -200,7 +604,7 @@ class VertxMqttBrokerTransportIntegrationTest {
     /**
      * Test configuration that binds to an ephemeral local port.
      */
-    private record TestBrokerRuntimeConfig() implements BrokerRuntimeConfig {
+    private record TestBrokerRuntimeConfig(int offlineQueueCapacityPerSession) implements BrokerRuntimeConfig {
 
         @Override
         public boolean enabled() {

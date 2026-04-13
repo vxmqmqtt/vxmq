@@ -1,0 +1,127 @@
+# 会话模型
+
+本文档定义 Broker 内部的会话真相模型。它回答“会话是什么、包含哪些字段、这些字段归谁管理、不同状态在内部如何表示”，不承担阶段汇报职责。
+
+## 目标
+
+- 让会话状态脱离“当前在线连接”的短生命周期。
+- 为 MQTT 3.1.1 `Clean Session` 与 MQTT 5 `Clean Start / Session Expiry` 提供统一内部表达。
+- 为后续离线消息、QoS 1 / QoS 2、Retained Message、Will Message 预留稳定承载位置。
+
+## 会话与连接的关系
+
+- 连接是网络层对象，由 `transport` 和 `ClientConnectionRegistry` 管理。
+- `ClientConnection` 内部只保存 broker 侧统一的“start clean”连接标志；MQTT 3.1.1 的 `Clean Session` 与 MQTT 5 的 `Clean Start` 在进入协议建模前不复用同一个协议术语字段名。
+- 会话是 `clientId` 归属的协议状态，由 `SessionRegistry` 管理。
+- 同一时刻一个 `clientId` 最多只有一个当前活跃连接，但可以存在一个离线会话。
+- 连接关闭不等于会话必然删除；是否保留会话由 MQTT 版本和连接时策略决定。
+
+## 会话状态视图
+
+```mermaid
+flowchart LR
+    Online["在线会话
+connectionId != null"]
+    Offline["离线会话
+connectionId == null"]
+    Expiring["过期中的离线会话
+expiresAt != null"]
+
+    Online --> Offline
+    Offline --> Expiring
+```
+
+## 当前会话字段
+
+当前 `ClientSession` 至少包含以下字段：
+
+- `clientId`
+- `connectionId`
+- `persistent`
+- `sessionExpiryIntervalSeconds`
+- `expiresAt`
+- `subscriptions`
+- `queuedMessages`
+- `inflightMessages`
+
+字段语义：
+
+- `clientId`：会话主键，也是订阅、离线状态和后续消息状态的归属键。
+- `connectionId`：当前在线连接 ID；若为 `null`，表示会话处于离线状态。
+- `persistent`：连接关闭后该会话是否允许继续保留。
+- `sessionExpiryIntervalSeconds`：MQTT 5 会话过期秒数；对 MQTT 3.1.1 的持久会话使用 `null` 表示“无该字段”。
+- `expiresAt`：离线会话的预期过期时间；在线会话或无限期保留的 MQTT 3.1.1 持久会话为 `null`。
+- `subscriptions`：该会话拥有的订阅集合。
+- `queuedMessages`：该会话离线期间积压的待恢复 QoS 1 消息。
+- `inflightMessages`：已发送、等待订阅端 `PUBACK` 的 QoS 1 消息。
+- `willMessage`：当前会话生效中的基础遗嘱消息。
+
+## 在线、离线与过期
+
+### 在线会话
+
+- `connectionId != null`
+- `expiresAt == null`
+- 订阅修改直接写入该会话
+
+### 离线会话
+
+- `connectionId == null`
+- 持久会话在连接关闭后可进入离线状态
+- 订阅集合继续保留，供后续重连恢复
+- 离线队列继续保留，供重连恢复投递
+
+### 过期会话
+
+- 当前实现采用“记录 `expiresAt` + 懒清理”策略
+- 若离线会话的 `expiresAt` 已到，下一次访问该会话时删除
+- 当前阶段不引入后台扫描器
+
+## 持久标记的内部表达
+
+- MQTT 3.1.1：`cleanSession=false` 的会话在内部视为持久会话
+- MQTT 5：`Session Expiry Interval>0` 的会话在内部视为持久会话
+- MQTT 3.1.1：`cleanSession=true` 的会话在内部视为非持久会话
+- MQTT 5：`Session Expiry Interval=0` 的会话在内部视为非持久会话
+
+这些标记如何影响 CONNECT、close、reconnect 和 expiry，由 [`../03-protocol/session-lifecycle.md`](../03-protocol/session-lifecycle.md) 统一定义。
+
+## SessionRegistry 的职责
+
+`SessionRegistry` 是会话真相的唯一所有者，当前职责包括：
+
+- 维护会话级订阅集合
+- 维护离线队列与 QoS 1 inflight 状态
+- 按协议层决策创建、更新、删除和查询会话
+- 在读取或修改会话前执行懒清理
+
+由于 `session` 是跨连接共享状态，而不是单个 event loop 私有的连接对象，所以它比 `connection` 层采用更保守的同步策略：简单字段使用可见性保证，离线队列、QoS inflight、packet id 分配和 will 清除/提取等复合状态使用显式同步保护原子性。
+
+`SessionRegistry` 不负责：
+
+- 管理在线 endpoint
+- 执行 Topic 匹配
+- 处理跨重启恢复
+
+## 与路由索引的关系
+
+- `SessionRegistry` 保存“会话拥有了哪些订阅”
+- `SubscriptionRegistry` 保存“这些订阅如何参与匹配”
+- 订阅状态的真相属于 `session`；`routing` 只维护用于匹配和投递的派生索引
+- 当会话被显式删除时，`protocol` 负责同步清理路由索引中的对应绑定
+- 当前阶段仍使用内存态订阅索引，不在本阶段引入订阅树
+
+## 当前阶段边界
+
+当前会话模型已经覆盖：
+
+- MQTT 3.1.1 / MQTT 5 共用的内部会话字段表达
+- 在线 / 离线 / 过期中的内部状态表示
+- 离线会话的订阅、离线消息与 QoS 1 inflight 承载
+- QoS 1 inflight 跟踪
+- 基础 Will Message 状态承载
+- 会话懒清理
+
+当前仍未覆盖：
+
+- 持久化与跨重启恢复

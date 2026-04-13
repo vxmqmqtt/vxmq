@@ -15,6 +15,35 @@
 - 主链路采用响应式、非阻塞、event-loop 模型。
 - 在 Quarkus 中接入 Vert.x 扩展时，优先使用 Mutiny 变体。
 
+## 架构关系图
+
+```mermaid
+flowchart TD
+    subgraph Host["宿主层"]
+        Bootstrap["bootstrap"]
+        Config["config"]
+    end
+
+    subgraph Core["Broker 核心"]
+        Transport["transport"]
+        Protocol["protocol"]
+        Session["session"]
+        Routing["routing"]
+        Auth["auth"]
+        Observability["observability"]
+        Connections["connectionRegistry"]
+    end
+
+    Bootstrap --> Transport
+    Config --> Transport
+    Transport --> Protocol
+    Protocol --> Session
+    Protocol --> Routing
+    Protocol --> Auth
+    Protocol --> Observability
+    Protocol --> Connections
+```
+
 ## 系统分层
 
 ### 宿主层
@@ -45,6 +74,20 @@
 
 职责：记录主链路关键事件，为后续日志、指标和诊断能力提供统一出口。
 
+## 并发与状态模型
+
+- Broker 主链路建立在 Vert.x event loop 上：连接建立、报文回调、断连与 close 处理默认按 event loop 事件顺序推进。
+- “同一连接的关键回调默认由 event loop 串行驱动”是当前架构前提，不是局部实现细节。
+- `ClientConnection` 属于连接级状态对象，默认遵循 `event-loop-first` 模型：
+- 它优先依赖 event loop 串行语义维护连接生命周期与轻量连接状态。
+- 对少量需要跨线程观察的字段，使用 `volatile` 做可见性保证，而不是把连接对象当作通用共享聚合状态来设计。
+- `ClientSession` 属于跨连接、跨生命周期的共享会话状态对象：
+- 它会被会话恢复、离线消息恢复、QoS inflight 处理等路径共同访问。
+- 对离线队列、inflight、packet id 分配等复合可变状态，使用显式同步保护原子性和内部一致性。
+- `routing` 与其他索引类状态不强制复用同一并发策略；它们按自身数据结构和访问模式选择合适的并发控制方式。
+
+这意味着：连接级对象与会话级对象不要求采用同一种同步手段，判断标准是“状态归属和执行模型”，而不是代码风格统一。
+
 ## 当前已落地模块
 
 - `bootstrap`: Quarkus 启停桥接
@@ -70,7 +113,7 @@
 ### 连接建立
 
 1. `transport` 接收 CONNECT 并转换为内部 `ConnectRequest`
-2. `protocol` 校验协议、鉴权、解析 `clientId` 并给出接管决策
+2. `protocol` 校验协议、鉴权、解析 `clientId` 并决定“新建会话 / 恢复会话 / 替换旧会话”
 3. `session` 与 `connectionRegistry` 更新当前连接归属
 4. `transport` 按版本差异返回 CONNACK，并在必要时关闭旧连接
 
@@ -84,13 +127,15 @@
 ### 断连
 
 1. `transport` 接收主动断连、连接关闭或 Keep Alive 超时事件
-2. `protocol` 更新连接和会话状态
+2. `protocol` 更新连接和会话状态，并按持久策略决定保留或删除会话
 3. `transport` 清理在线 endpoint 索引
 
 ## 相关文档
 
 - [`module-design.md`](module-design.md)
+- [`session-model.md`](session-model.md)
 - [`topic-routing.md`](topic-routing.md)
 - [`../03-protocol/connect-flow.md`](../03-protocol/connect-flow.md)
+- [`../03-protocol/session-lifecycle.md`](../03-protocol/session-lifecycle.md)
 - [`../03-protocol/subscribe-flow.md`](../03-protocol/subscribe-flow.md)
 - [`../03-protocol/publish-flow.md`](../03-protocol/publish-flow.md)

@@ -1,42 +1,46 @@
 package io.github.vxmqmqtt.vxmq.transport;
 
+import io.github.vxmqmqtt.vxmq.protocol.model.WillMessage;
 import java.util.Objects;
 
 /**
  * Broker-side view of a transport connection and its negotiated MQTT identity.
+ * The start-clean flag is a broker-internal abstraction: it maps to MQTT 3.1.1 Clean Session
+ * and MQTT 5 Clean Start without preserving version-specific field names here.
  */
 public final class ClientConnection {
 
-    private final String internalId;
+    private final String connectionId;
     private final String remoteAddress;
     private final String requestedClientId;
     private final String protocolName;
     private final int protocolVersion;
-    private final boolean cleanSession;
+    private final boolean startCleanSession;
     private volatile String effectiveClientId;
+    private volatile WillMessage willMessage;
     private volatile ConnectionState state;
 
     public ClientConnection(
-            String internalId,
+            String connectionId,
             String remoteAddress,
             String requestedClientId,
             String protocolName,
             int protocolVersion,
-            boolean cleanSession) {
-        this.internalId = Objects.requireNonNull(internalId, "internalId");
+            boolean startCleanSession) {
+        this.connectionId = Objects.requireNonNull(connectionId, "connectionId");
         this.remoteAddress = remoteAddress == null ? "unknown" : remoteAddress;
         this.requestedClientId = requestedClientId == null ? "" : requestedClientId;
         this.protocolName = protocolName == null ? "" : protocolName;
         this.protocolVersion = protocolVersion;
-        this.cleanSession = cleanSession;
+        this.startCleanSession = startCleanSession;
         this.state = ConnectionState.NEW;
     }
 
     /**
-     * Returns the broker-generated internal connection identifier.
+     * Returns the broker-generated connection identifier.
      */
-    public String internalId() {
-        return internalId;
+    public String connectionId() {
+        return connectionId;
     }
 
     public String remoteAddress() {
@@ -55,12 +59,38 @@ public final class ClientConnection {
         return protocolVersion;
     }
 
-    public boolean cleanSession() {
-        return cleanSession;
+    /**
+     * Returns whether this connection requested a fresh session start.
+     */
+    public boolean startCleanSession() {
+        return startCleanSession;
     }
 
     public String effectiveClientId() {
         return effectiveClientId;
+    }
+
+    /**
+     * Stores the will message negotiated for this specific live connection.
+     */
+    public void assignWillMessage(WillMessage willMessage) {
+        this.willMessage = copyWillMessage(willMessage);
+    }
+
+    /**
+     * Clears the will for this live connection without returning it.
+     */
+    public void clearWillMessage() {
+        this.willMessage = null;
+    }
+
+    /**
+     * Clears and returns the will for this live connection so it can be published only once.
+     */
+    public WillMessage takeWillMessage() {
+        WillMessage current = willMessage;
+        willMessage = null;
+        return copyWillMessage(current);
     }
 
     /**
@@ -79,5 +109,16 @@ public final class ClientConnection {
      */
     public void transitionTo(ConnectionState newState) {
         this.state = Objects.requireNonNull(newState, "newState");
+    }
+
+    private WillMessage copyWillMessage(WillMessage source) {
+        if (source == null) {
+            return null;
+        }
+        return new WillMessage(
+                source.topicName(),
+                source.payloadCopy(),
+                source.qos(),
+                source.retain());
     }
 }
