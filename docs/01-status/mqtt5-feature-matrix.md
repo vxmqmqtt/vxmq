@@ -1,6 +1,6 @@
 # MQTT 特性矩阵
 
-本文档只回答一个问题：项目当前对哪些能力支持到什么程度。阶段规划看 [`milestones.md`](milestones.md)，`M3` 执行清单看 [`m3-backlog.md`](m3-backlog.md)，历史验收看 [`m1-acceptance-checklist.md`](m1-acceptance-checklist.md) 和 [`m2-acceptance-checklist.md`](m2-acceptance-checklist.md)。
+本文档只回答一个问题：项目当前对哪些能力支持到什么程度。路线图看 [`roadmap.md`](roadmap.md)，当前状态看 [`current-status.md`](current-status.md)。
 
 ## 状态定义
 

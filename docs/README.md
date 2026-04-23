@@ -1,104 +1,49 @@
 # 文档导航
 
-`docs/` 是项目文档的唯一入口。这里的文档按三种职责组织：
+`docs/` 是项目文档的唯一入口。重构后的文档体系按三类职责组织：
 
-- `规范真相`：长期稳定、指导实现的文档
-- `当前状态`：集中承载项目目前进行到哪里
-- `历史记录`：ADR、阶段验收等不可替代的留痕文档
+- `00-foundation`：项目定位、范围、协议兼容原则和术语。
+- `01-status`：当前状态、路线图和能力矩阵。
+- `02-architecture` / `03-protocol`：长期系统真相。
+- `07-project` / `99-archive`：协作约束、ADR 与历史记录。
 
-## 首次阅读建议
+## 我想知道项目做什么
 
-第一次进入项目时，建议先看这几份：
+- 项目定位与范围：[`00-foundation/project.md`](00-foundation/project.md)
+- 协议兼容原则：[`00-foundation/compatibility.md`](00-foundation/compatibility.md)
+- 术语表：[`00-foundation/glossary.md`](00-foundation/glossary.md)
 
-1. [`00-foundation/vision.md`](00-foundation/vision.md)
-2. [`00-foundation/scope.md`](00-foundation/scope.md)
-3. [`00-foundation/compatibility.md`](00-foundation/compatibility.md)
-4. [`01-status/current-status.md`](01-status/current-status.md)
-5. [`01-status/mqtt5-feature-matrix.md`](01-status/mqtt5-feature-matrix.md)
-6. [`02-architecture/architecture-overview.md`](02-architecture/architecture-overview.md)
-7. [`07-project/collaboration.md`](07-project/collaboration.md)
+## 我想知道当前做到哪
 
-## 专题导航
+- 当前状态：[`01-status/current-status.md`](01-status/current-status.md)
+- MQTT 能力矩阵：[`01-status/mqtt5-feature-matrix.md`](01-status/mqtt5-feature-matrix.md)
 
-### 基础与范围
+## 我想知道接下来做什么
 
-- [`00-foundation/vision.md`](00-foundation/vision.md)
-- [`00-foundation/scope.md`](00-foundation/scope.md)
-- [`00-foundation/compatibility.md`](00-foundation/compatibility.md)
-- [`00-foundation/glossary.md`](00-foundation/glossary.md)
+- 路线图与当前活跃里程碑：[`01-status/roadmap.md`](01-status/roadmap.md)
 
-### 当前状态与路线图
+## 我想知道系统怎么组织
 
-- [`01-status/current-status.md`](01-status/current-status.md)
-- [`01-status/mqtt5-feature-matrix.md`](01-status/mqtt5-feature-matrix.md)
-- [`01-status/milestones.md`](01-status/milestones.md)
-- [`01-status/m3-backlog.md`](01-status/m3-backlog.md)
-- [`01-status/m1-acceptance-checklist.md`](01-status/m1-acceptance-checklist.md)
-- [`01-status/m2-acceptance-checklist.md`](01-status/m2-acceptance-checklist.md)
+- 系统设计与模块边界：[`02-architecture/system-design.md`](02-architecture/system-design.md)
+- 状态归属与路由索引：[`02-architecture/state-and-routing.md`](02-architecture/state-and-routing.md)
 
-### 会话与可靠性
+## 我想知道协议行为是什么
 
-- [`02-architecture/session-model.md`](02-architecture/session-model.md)
-- [`03-protocol/session-lifecycle.md`](03-protocol/session-lifecycle.md)
-- [`02-architecture/offline-message-model.md`](02-architecture/offline-message-model.md)
-- [`03-protocol/qos1-flow.md`](03-protocol/qos1-flow.md)
+- 连接建立、恢复与断连：[`03-protocol/connection-lifecycle.md`](03-protocol/connection-lifecycle.md)
+- 发布、订阅、匹配、QoS、retained、will：[`03-protocol/message-delivery.md`](03-protocol/message-delivery.md)
 
-### 消息语义
+## 我想知道为什么这样设计
 
-- [`02-architecture/retained-message-model.md`](02-architecture/retained-message-model.md)
-- [`03-protocol/retain-flow.md`](03-protocol/retain-flow.md)
-- [`02-architecture/will-message-model.md`](02-architecture/will-message-model.md)
-- [`03-protocol/will-flow.md`](03-protocol/will-flow.md)
-- [`03-protocol/publish-flow.md`](03-protocol/publish-flow.md)
+- 协作规范：[`07-project/collaboration.md`](07-project/collaboration.md)
+- ADR 列表：[`07-project/decisions/`](07-project/decisions/)
 
-### 路由与订阅
+## 我想看历史记录
 
-- [`02-architecture/subscription-tree-model.md`](02-architecture/subscription-tree-model.md)
-- [`02-architecture/topic-routing.md`](02-architecture/topic-routing.md)
-- [`03-protocol/topic-match-flow.md`](03-protocol/topic-match-flow.md)
-- [`03-protocol/subscribe-flow.md`](03-protocol/subscribe-flow.md)
-
-### 协作规范与历史决策
-
-- [`07-project/collaboration.md`](07-project/collaboration.md)
-- [`07-project/decisions/0006-routing-concurrency-strategy.md`](07-project/decisions/0006-routing-concurrency-strategy.md)
-- [`07-project/decisions/`](07-project/decisions/)
-
-## 目录说明
-
-### `00-foundation`
-
-项目最稳定的基础文档：
-
-- 愿景
-- 范围
-- 协议兼容原则
-- 术语表
-
-### `01-status`
-
-项目状态与阶段规划的集中入口：
-
-- 当前状态
-- 特性矩阵
-- 里程碑规划
-- 已完成阶段的历史验收
-
-### `02-architecture`
-
-系统整体架构、模块边界、会话模型、离线消息模型、Retained Message 模型、Will Message 模型、订阅树模型和 Topic 路由设计。
-
-### `03-protocol`
-
-Broker 对 CONNECT、会话生命周期、QoS 1、Retained Message、Will Message、Topic 匹配、SUBSCRIBE / UNSUBSCRIBE、PUBLISH 的长期协议行为说明。
-
-### `07-project`
-
-协作规范与 ADR。ADR 属于历史决策记录，不替代稳定规范文档。
+- 历史归档入口：[`99-archive/README.md`](99-archive/README.md)
 
 ## 使用规则
 
-- 当前状态只在 `01-status/` 集中维护，其他设计文档不重复写阶段总结。
-- 设计文档优先追求长期稳定，不承载短期任务清单。
-- 重要实现选择进入 `07-project/decisions/`。
-- 性能/并发评估代码作为独立评估套件维护，不进入默认 `./mvnw test` 回归路径；routing 写路径评估需区分单次 churn 与整批 snapshot 重建。
+- 当前状态只在 `01-status/` 维护。
+- 长期系统真相只在 `00-foundation/`、`02-architecture/`、`03-protocol/` 维护。
+- ADR 负责记录关键决策原因，不承担当前状态入口职责。
+- 归档文档用于保留历史结论，不作为当前真相引用源。

@@ -1,6 +1,6 @@
 # M2 验收清单
 
-本文档是 `M2 会话与可靠性基础` 的历史验收记录，用于保留阶段封板结论。当前项目状态统一查看 [`current-status.md`](current-status.md)。
+本文档是 `M2 会话与可靠性基础` 的历史验收记录，用于保留阶段封板结论。当前项目状态统一查看 [`../../01-status/current-status.md`](../../01-status/current-status.md)。
 
 ## 交付内容检查
 

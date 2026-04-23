@@ -1,6 +1,6 @@
 # 当前状态
 
-本文档是项目当前状态的唯一集中入口。除里程碑文档和历史验收文档外，其他设计文档不再重复维护阶段结论。
+本文档是项目当前状态的唯一集中入口。当前阶段、能力边界、当前缺口和下一步优先级统一在这里维护。
 
 ## 当前阶段
 
@@ -37,15 +37,15 @@
 
 ## 当前文档真相入口
 
-- 项目目标与边界：[`../00-foundation/vision.md`](../00-foundation/vision.md)、[`../00-foundation/scope.md`](../00-foundation/scope.md)
+- 项目定位与范围：[`../00-foundation/project.md`](../00-foundation/project.md)
 - 协议兼容策略：[`../00-foundation/compatibility.md`](../00-foundation/compatibility.md)
-- 会话设计真相：[`../02-architecture/session-model.md`](../02-architecture/session-model.md)、[`../03-protocol/session-lifecycle.md`](../03-protocol/session-lifecycle.md)
-- Will 设计真相：[`../02-architecture/will-message-model.md`](../02-architecture/will-message-model.md)、[`../03-protocol/will-flow.md`](../03-protocol/will-flow.md)
-- 订阅树设计真相：[`../02-architecture/subscription-tree-model.md`](../02-architecture/subscription-tree-model.md)、[`../03-protocol/topic-match-flow.md`](../03-protocol/topic-match-flow.md)
+- 系统设计与模块边界：[`../02-architecture/system-design.md`](../02-architecture/system-design.md)
+- 状态归属与路由索引：[`../02-architecture/state-and-routing.md`](../02-architecture/state-and-routing.md)
+- 连接建立、恢复与断连：[`../03-protocol/connection-lifecycle.md`](../03-protocol/connection-lifecycle.md)
+- 发布、订阅与消息投递：[`../03-protocol/message-delivery.md`](../03-protocol/message-delivery.md)
 - 特性完成度：[`mqtt5-feature-matrix.md`](mqtt5-feature-matrix.md)
-- 阶段规划：[`milestones.md`](milestones.md)
-- 当前已完成阶段的历史验收：[`m1-acceptance-checklist.md`](m1-acceptance-checklist.md)、[`m2-acceptance-checklist.md`](m2-acceptance-checklist.md)
-- `M3` 可执行开发清单：[`m3-backlog.md`](m3-backlog.md)
+- 路线图与当前活跃里程碑：[`roadmap.md`](roadmap.md)
+- 历史阶段验收：[`../99-archive/README.md`](../99-archive/README.md)
 
 ## 当前主要缺口
 
@@ -56,4 +56,4 @@
 
 `M3` 的下一步重点从“内部基础设施升级”转向“协议完整性与运维补全”：QoS 2、Subscription Options、Subscription Identifier、基础鉴权和可观测性。
 
-当前建议按 [`m3-backlog.md`](m3-backlog.md) 的优先级推进并逐项更新状态。
+当前建议按 [`roadmap.md`](roadmap.md) 中的 `M3` 执行表推进并逐项更新状态。

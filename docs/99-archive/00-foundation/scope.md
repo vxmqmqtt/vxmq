@@ -1,6 +1,6 @@
 # 范围定义
 
-本文档定义项目范围边界。阶段状态、完成度和下一步规划统一查看 [`../01-status/current-status.md`](../01-status/current-status.md) 与 [`../01-status/milestones.md`](../01-status/milestones.md)。
+本文档定义项目范围边界。阶段状态、完成度和下一步规划统一查看 [`../../01-status/current-status.md`](../../01-status/current-status.md) 与 [`../01-status/milestones.md`](../01-status/milestones.md)。
 
 ## 长期承诺范围
 

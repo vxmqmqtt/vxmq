@@ -1,6 +1,6 @@
 # M3 开发清单
 
-本文档是 `M3 协议完整性与基础运维` 的可执行开发清单。阶段目标与出口定义查看 [`milestones.md`](milestones.md)，当前状态查看 [`current-status.md`](current-status.md)。
+本文档是 `M3 协议完整性与基础运维` 的可执行开发清单。阶段目标与出口定义查看 [`milestones.md`](milestones.md)，当前状态查看 [`../../01-status/current-status.md`](../../01-status/current-status.md)。
 
 ## 使用规则
 

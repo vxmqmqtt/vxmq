@@ -1,6 +1,6 @@
 # CONNECT 流程
 
-本文档描述 Broker 对 CONNECT 的长期处理规则。当前完成度看 [`../01-status/mqtt5-feature-matrix.md`](../01-status/mqtt5-feature-matrix.md)。
+本文档描述 Broker 对 CONNECT 的长期处理规则。当前完成度看 [`../../01-status/mqtt5-feature-matrix.md`](../../01-status/mqtt5-feature-matrix.md)。
 
 ## 目的与范围
 

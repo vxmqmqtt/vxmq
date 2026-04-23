@@ -1,6 +1,6 @@
 # 架构概览
 
-本文档描述 `vxmq` 的长期架构骨架，强调系统分层、模块边界和演进方向。当前阶段结论统一查看 [`../01-status/current-status.md`](../01-status/current-status.md)。
+本文档描述 `vxmq` 的长期架构骨架，强调系统分层、模块边界和演进方向。当前阶段结论统一查看 [`../../01-status/current-status.md`](../../01-status/current-status.md)。
 
 ## 设计目标
 
