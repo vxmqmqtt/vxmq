@@ -22,4 +22,4 @@
 
 ## 当前定位
 
-项目当前已完成 `M1 最小闭环`，已具备单机 Broker 的最小连接、订阅、发布、取消订阅与断连主链路。当前状态与阶段结论统一记录在 [`../01-status/current-status.md`](../01-status/current-status.md)。
+项目当前已完成 `M1 最小闭环` 与 `M2 会话与可靠性基础`，已具备单机、内存态 Broker 的可靠性基础版本。当前状态与阶段结论统一记录在 [`../01-status/current-status.md`](../01-status/current-status.md)。

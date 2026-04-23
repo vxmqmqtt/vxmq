@@ -44,7 +44,8 @@
 - 订阅树设计真相：[`../02-architecture/subscription-tree-model.md`](../02-architecture/subscription-tree-model.md)、[`../03-protocol/topic-match-flow.md`](../03-protocol/topic-match-flow.md)
 - 特性完成度：[`mqtt5-feature-matrix.md`](mqtt5-feature-matrix.md)
 - 阶段规划：[`milestones.md`](milestones.md)
-- 当前已完成阶段的历史验收：[`m1-acceptance-checklist.md`](m1-acceptance-checklist.md)
+- 当前已完成阶段的历史验收：[`m1-acceptance-checklist.md`](m1-acceptance-checklist.md)、[`m2-acceptance-checklist.md`](m2-acceptance-checklist.md)
+- `M3` 可执行开发清单：[`m3-backlog.md`](m3-backlog.md)
 
 ## 当前主要缺口
 
@@ -54,3 +55,5 @@
 ## 下一阶段入口
 
 `M3` 的下一步重点从“内部基础设施升级”转向“协议完整性与运维补全”：QoS 2、Subscription Options、Subscription Identifier、基础鉴权和可观测性。
+
+当前建议按 [`m3-backlog.md`](m3-backlog.md) 的优先级推进并逐项更新状态。

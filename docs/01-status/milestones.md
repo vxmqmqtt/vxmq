@@ -1,6 +1,7 @@
 # 里程碑规划
 
 本文档定义项目阶段规划。当前状态结论看 [`current-status.md`](current-status.md)，具体能力完成度看 [`mqtt5-feature-matrix.md`](mqtt5-feature-matrix.md)。
+`M3` 的执行拆解清单看 [`m3-backlog.md`](m3-backlog.md)。
 
 ## M1 最小闭环
 

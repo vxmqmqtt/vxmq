@@ -32,6 +32,7 @@
 - [`01-status/current-status.md`](01-status/current-status.md)
 - [`01-status/mqtt5-feature-matrix.md`](01-status/mqtt5-feature-matrix.md)
 - [`01-status/milestones.md`](01-status/milestones.md)
+- [`01-status/m3-backlog.md`](01-status/m3-backlog.md)
 - [`01-status/m1-acceptance-checklist.md`](01-status/m1-acceptance-checklist.md)
 - [`01-status/m2-acceptance-checklist.md`](01-status/m2-acceptance-checklist.md)
 

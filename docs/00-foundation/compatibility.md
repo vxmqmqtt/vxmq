@@ -33,7 +33,7 @@
 ## 当前已确定的关键兼容性决策
 
 - 同时支持 MQTT 3.1.1 与 MQTT 5。
-- `M1` 主链路以 QoS 0 为实现边界，QoS 1/2 留待后续里程碑。
+- 当前主链路已支持 QoS 0 / QoS 1，QoS 2 留待 `M3`。
 - 连接接管场景中，MQTT 5 使用 `DISCONNECT(Session taken over)`，MQTT 3.1.1 直接关闭连接。
 - Keep Alive 超时依赖 `vertx-mqtt` 内置处理，不重复实现第二套定时逻辑。
 

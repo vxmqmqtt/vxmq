@@ -15,10 +15,11 @@
 3. [`docs/00-foundation/compatibility.md`](docs/00-foundation/compatibility.md)
 4. [`docs/01-status/current-status.md`](docs/01-status/current-status.md)
 5. [`docs/01-status/mqtt5-feature-matrix.md`](docs/01-status/mqtt5-feature-matrix.md)
-6. [`docs/02-architecture/architecture-overview.md`](docs/02-architecture/architecture-overview.md)
-7. [`docs/02-architecture/topic-routing.md`](docs/02-architecture/topic-routing.md)
-8. [`docs/07-project/decisions/0006-routing-concurrency-strategy.md`](docs/07-project/decisions/0006-routing-concurrency-strategy.md)
-7. [`docs/07-project/collaboration.md`](docs/07-project/collaboration.md)
+6. [`docs/01-status/m3-backlog.md`](docs/01-status/m3-backlog.md)
+7. [`docs/02-architecture/architecture-overview.md`](docs/02-architecture/architecture-overview.md)
+8. [`docs/02-architecture/topic-routing.md`](docs/02-architecture/topic-routing.md)
+9. [`docs/07-project/decisions/0006-routing-concurrency-strategy.md`](docs/07-project/decisions/0006-routing-concurrency-strategy.md)
+10. [`docs/07-project/collaboration.md`](docs/07-project/collaboration.md)
 
 ## 开发运行
 

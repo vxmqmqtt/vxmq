@@ -30,7 +30,7 @@
 - 历史阶段文档应显式标注为历史记录，避免被误用为当前真相。
 - 对架构分层、状态流转、协议时序、复杂决策路径等难以仅靠文字快速理解的内容，应优先使用 Mermaid 图辅助表达；图应服务于澄清结构、流程和边界，不为形式而重复正文内容。
 - 修改文档结构后，必须同步检查 `README.md` 和 `docs/README.md` 的入口链接是否仍然准确。
-- 当阶段推进、封板或进入新里程碑时，必须同步检查 `README.md`、`docs/README.md` 和 `docs/01-status/current-status.md` 的阶段表述是否一致。
+- 当阶段推进、封板或进入新里程碑时，必须同步检查 `README.md`、`docs/README.md`、`docs/01-status/current-status.md` 和 `docs/01-status/m3-backlog.md` 的阶段表述与执行状态是否一致。
 
 ## 开发规则
 
