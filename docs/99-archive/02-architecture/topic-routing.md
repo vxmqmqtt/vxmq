@@ -91,9 +91,9 @@ Topic Filter 与 Topic Name 各层级完全相同则匹配。
 - 当前主线采用 `snapshot / copy-on-write` 订阅树：读路径读取一次根快照后在不可变树上遍历，写路径通过路径复制和根替换发布新快照。
 - 当前主线已进一步加入两项写路径优化：更紧凑的不可变 child / binding 容器，以及内部 batch snapshot builder，用于降低小节点复制成本并支持整批重建。
 - 会话删除时必须同步清理路由索引，避免派生索引残留导致消息被错误投递。
-- 同一客户端的重叠订阅在当前实现中只投递一次，相关决策见 [`../../07-project/decisions/0003-m1-overlapping-subscription-delivery.md`](../../07-project/decisions/0003-m1-overlapping-subscription-delivery.md)。
+- 同一客户端的重叠订阅在当前实现中只投递一次，相关决策见 [`../../04-decisions/0003-m1-overlapping-subscription-delivery.md`](../../04-decisions/0003-m1-overlapping-subscription-delivery.md)。
 - Shared Subscription 仍未进入当前实现范围，因此路由结果当前不携带共享组语义。
-- 并发安全策略的原型评估已完成，相关结论见 [`../../07-project/decisions/0006-routing-concurrency-strategy.md`](../../07-project/decisions/0006-routing-concurrency-strategy.md)。
+- 并发安全策略的原型评估已完成，相关结论见 [`../../04-decisions/0006-routing-concurrency-strategy.md`](../../04-decisions/0006-routing-concurrency-strategy.md)。
 - 评估候选与 benchmark harness 作为独立评估套件保留，不进入默认回归路径；评估时应区分单次写 churn 与整批 snapshot 重建两类成本。
 
 ## 演进方向

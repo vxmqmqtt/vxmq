@@ -2,6 +2,8 @@
 
 本文档描述 `vxmq` 的长期架构骨架、模块边界和关键约束。它回答“系统由哪些模块组成、谁负责什么、模块之间如何协作”。
 
+边界：本文只描述系统结构与模块协作；Broker 对 MQTT 报文的外部行为见 [`connection-lifecycle.md`](connection-lifecycle.md) 和 [`message-delivery.md`](message-delivery.md)。
+
 ## 设计目标
 
 - 保持协议主链路与 MQTT 规范语义对齐。

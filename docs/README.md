@@ -4,8 +4,9 @@
 
 - `00-foundation`：项目定位、范围、协议兼容原则和术语。
 - `01-status`：当前状态、路线图和能力矩阵。
-- `02-architecture` / `03-protocol`：长期系统真相。
-- `07-project` / `99-archive`：协作约束、ADR 与历史记录。
+- `02-system`：长期系统真相，包括系统结构、状态模型和协议行为。
+- `04-decisions`：ADR 与关键决策记录。
+- `99-archive`：过期或被替换的历史文档。
 
 ## 我想知道项目做什么
 
@@ -24,18 +25,18 @@
 
 ## 我想知道系统怎么组织
 
-- 系统设计与模块边界：[`02-architecture/system-design.md`](02-architecture/system-design.md)
-- 状态归属与路由索引：[`02-architecture/state-and-routing.md`](02-architecture/state-and-routing.md)
+- 系统设计与模块边界：[`02-system/system-design.md`](02-system/system-design.md)
+- 状态归属与路由索引：[`02-system/state-and-routing.md`](02-system/state-and-routing.md)
 
 ## 我想知道协议行为是什么
 
-- 连接建立、恢复与断连：[`03-protocol/connection-lifecycle.md`](03-protocol/connection-lifecycle.md)
-- 发布、订阅、匹配、QoS、retained、will：[`03-protocol/message-delivery.md`](03-protocol/message-delivery.md)
+- 连接建立、恢复与断连：[`02-system/connection-lifecycle.md`](02-system/connection-lifecycle.md)
+- 发布、订阅、匹配、QoS、retained、will：[`02-system/message-delivery.md`](02-system/message-delivery.md)
 
 ## 我想知道为什么这样设计
 
-- 协作规范：[`07-project/collaboration.md`](07-project/collaboration.md)
-- ADR 列表：[`07-project/decisions/`](07-project/decisions/)
+- 当前协作规范：[`../CONTRIBUTING.md`](../CONTRIBUTING.md)
+- ADR 列表：[`04-decisions/README.md`](04-decisions/README.md)
 
 ## 我想看历史记录
 
@@ -44,6 +45,6 @@
 ## 使用规则
 
 - 当前状态只在 `01-status/` 维护。
-- 长期系统真相只在 `00-foundation/`、`02-architecture/`、`03-protocol/` 维护。
+- 长期系统真相只在 `00-foundation/` 和 `02-system/` 维护。
 - ADR 负责记录关键决策原因，不承担当前状态入口职责。
 - 归档文档用于保留历史结论，不作为当前真相引用源。

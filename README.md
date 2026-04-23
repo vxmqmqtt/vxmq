@@ -6,6 +6,7 @@
 
 - 文档导航：[`docs/README.md`](docs/README.md)
 - 当前状态：[`docs/01-status/current-status.md`](docs/01-status/current-status.md)
+- 协作约定：[`CONTRIBUTING.md`](CONTRIBUTING.md)
 - 代码入口：[`src/main/java/io/github/vxmqmqtt/vxmq`](src/main/java/io/github/vxmqmqtt/vxmq)
 - 运行配置：[`src/main/resources/application.yml`](src/main/resources/application.yml)
 
@@ -31,4 +32,4 @@
 
 ## 协作说明
 
-项目默认以中文沟通，协作约定见 [`docs/07-project/collaboration.md`](docs/07-project/collaboration.md)。
+项目默认以中文沟通，协作约定见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。

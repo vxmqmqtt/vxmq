@@ -2,6 +2,8 @@
 
 本文档定义 Broker 对连接建立、会话恢复、断连与关闭路径的长期协议行为。它回答“CONNECT 之后会发生什么、会话如何延续、哪些关闭路径会触发什么后果”。
 
+边界：本文描述 Broker 对 MQTT 连接相关报文和生命周期语义的外部行为；内部模块职责和状态归属见 [`system-design.md`](system-design.md) 与 [`state-and-routing.md`](state-and-routing.md)。
+
 ## 目的与范围
 
 - 统一 CONNECT、CONNACK、会话恢复和连接接管语义。

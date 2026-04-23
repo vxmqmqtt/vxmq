@@ -2,6 +2,8 @@
 
 本文档定义 `vxmq` 当前的状态归属、路由索引和相关边界。它回答“哪些状态由谁拥有、消息如何在这些状态之间流转、routing 与 retained 如何协作”。
 
+边界：本文只描述内部状态和索引真相；协议报文处理顺序和对客户端可见的行为见 [`connection-lifecycle.md`](connection-lifecycle.md) 和 [`message-delivery.md`](message-delivery.md)。
+
 ## 总体原则
 
 - 会话真相在 `session`，而不是 `routing`。
