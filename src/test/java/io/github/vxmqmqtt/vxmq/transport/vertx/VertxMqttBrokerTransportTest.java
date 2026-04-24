@@ -13,6 +13,9 @@ import io.github.vxmqmqtt.vxmq.protocol.model.ConnectRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishDelivery;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishResult;
+import io.github.vxmqmqtt.vxmq.protocol.model.PubRecResult;
+import io.github.vxmqmqtt.vxmq.protocol.model.PubRelResult;
+import io.github.vxmqmqtt.vxmq.protocol.model.SessionResumeResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscribeResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeResult;
@@ -25,6 +28,7 @@ import io.vertx.core.buffer.Buffer;
 import io.vertx.mqtt.messages.MqttPublishMessage;
 import io.vertx.mqtt.messages.codes.MqttDisconnectReasonCode;
 import io.vertx.mqtt.messages.codes.MqttPubAckReasonCode;
+import io.vertx.mqtt.messages.codes.MqttPubRecReasonCode;
 import io.vertx.mutiny.mqtt.MqttEndpoint;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -110,6 +114,67 @@ class VertxMqttBrokerTransportTest {
         assertFalse(probe.closeCalled);
         assertTrue(probe.disconnectCalled);
         assertEquals(MqttDisconnectReasonCode.TOPIC_NAME_INVALID, probe.disconnectReasonCode);
+    }
+
+    // Verifies that accepted inbound QoS 2 publishes are acknowledged with PUBREC.
+    @Test
+    void shouldSendPubRecForInboundQos2Publish() throws Exception {
+        ProtocolEngine protocolEngine = protocolEngineReturning(PublishResult.qos2Received(MqttPubRecReasonCode.SUCCESS));
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngine,
+                new ClientConnectionRegistry(),
+                brokerEventSink());
+        ClientConnection connection = connectedClient("client-qos2-publish");
+        EndpointProbe probe = new EndpointProbe(5, true);
+
+        installHandlers(transport, connection, probe.endpoint());
+        probe.invokePublishHandler(new PublishMessageProbe("sensors/room-1/temperature", 11, 2, false, false, "payload")
+                .message());
+
+        assertTrue(probe.publishReceivedCalled);
+        assertEquals(11, probe.publishReceivedPacketId);
+    }
+
+    // Verifies that inbound PUBREL is completed with PUBCOMP.
+    @Test
+    void shouldSendPubCompForInboundPubRel() throws Exception {
+        ProtocolEngine protocolEngine = protocolEngineReturning(PublishResult.rejectedWithoutDisconnect());
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngine,
+                new ClientConnectionRegistry(),
+                brokerEventSink());
+        ClientConnection connection = connectedClient("client-qos2-pubrel");
+        EndpointProbe probe = new EndpointProbe(5, true);
+
+        installHandlers(transport, connection, probe.endpoint());
+        probe.invokePublishReleaseHandler(12);
+
+        assertTrue(probe.publishCompleteCalled);
+        assertEquals(12, probe.publishCompletePacketId);
+    }
+
+    // Verifies that subscriber PUBREC advances outbound QoS 2 by sending PUBREL.
+    @Test
+    void shouldSendPubRelForOutboundPubRec() throws Exception {
+        ProtocolEngine protocolEngine = protocolEngineReturning(PublishResult.rejectedWithoutDisconnect());
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngine,
+                new ClientConnectionRegistry(),
+                brokerEventSink());
+        ClientConnection connection = connectedClient("client-qos2-pubrec");
+        EndpointProbe probe = new EndpointProbe(5, true);
+
+        installHandlers(transport, connection, probe.endpoint());
+        probe.invokePublishReceivedHandler(13);
+
+        assertTrue(probe.publishReleaseCalled);
+        assertEquals(13, probe.publishReleasePacketId);
     }
 
     private static void installHandlers(
@@ -219,12 +284,26 @@ class VertxMqttBrokerTransportTest {
             }
 
             @Override
-            public List<PublishDelivery> handleSessionResume(ClientConnection connection) {
-                return List.of();
+            public SessionResumeResult handleSessionResume(ClientConnection connection) {
+                return SessionResumeResult.empty();
             }
 
             @Override
             public void handlePubAck(ClientConnection connection, int packetId) {
+            }
+
+            @Override
+            public PubRelResult handlePubRel(ClientConnection connection, int packetId) {
+                return PubRelResult.alreadyComplete();
+            }
+
+            @Override
+            public PubRecResult handlePubRec(ClientConnection connection, int packetId) {
+                return PubRecResult.release();
+            }
+
+            @Override
+            public void handlePubComp(ClientConnection connection, int packetId) {
             }
 
             @Override
@@ -249,9 +328,17 @@ class VertxMqttBrokerTransportTest {
         private boolean closeCalled;
         private boolean disconnectCalled;
         private boolean publishAcknowledgeCalled;
+        private boolean publishReceivedCalled;
+        private boolean publishReleaseCalled;
+        private boolean publishCompleteCalled;
+        private int publishReceivedPacketId;
+        private int publishReleasePacketId;
+        private int publishCompletePacketId;
         private MqttDisconnectReasonCode disconnectReasonCode;
         private MqttProperties disconnectProperties;
         private Handler<MqttPublishMessage> publishHandler;
+        private Handler<Integer> publishReleaseHandler;
+        private Handler<Integer> publishReceivedHandler;
 
         private EndpointProbe(int protocolVersion, boolean connected) {
             this.protocolVersion = protocolVersion;
@@ -267,10 +354,33 @@ class VertxMqttBrokerTransportTest {
                             this.publishHandler = castHandler(args[0]);
                             yield proxy;
                         }
+                        case "publishReleaseHandler" -> {
+                            this.publishReleaseHandler = castIntegerHandler(args[0]);
+                            yield proxy;
+                        }
+                        case "publishReceivedHandler" -> {
+                            this.publishReceivedHandler = castIntegerHandler(args[0]);
+                            yield proxy;
+                        }
                         case "subscribeHandler", "unsubscribeHandler", "disconnectHandler",
-                                "publishAcknowledgeHandler", "closeHandler" -> proxy;
+                                "publishAcknowledgeHandler", "publishCompletionHandler", "closeHandler" -> proxy;
                         case "publishAcknowledge" -> {
                             this.publishAcknowledgeCalled = true;
+                            yield proxy;
+                        }
+                        case "publishReceived" -> {
+                            this.publishReceivedCalled = true;
+                            this.publishReceivedPacketId = (int) args[0];
+                            yield proxy;
+                        }
+                        case "publishRelease" -> {
+                            this.publishReleaseCalled = true;
+                            this.publishReleasePacketId = (int) args[0];
+                            yield proxy;
+                        }
+                        case "publishComplete" -> {
+                            this.publishCompleteCalled = true;
+                            this.publishCompletePacketId = (int) args[0];
                             yield proxy;
                         }
                         case "close" -> {
@@ -300,9 +410,24 @@ class VertxMqttBrokerTransportTest {
             publishHandler.handle(message);
         }
 
+        private void invokePublishReleaseHandler(int packetId) {
+            assertNotNull(publishReleaseHandler);
+            publishReleaseHandler.handle(packetId);
+        }
+
+        private void invokePublishReceivedHandler(int packetId) {
+            assertNotNull(publishReceivedHandler);
+            publishReceivedHandler.handle(packetId);
+        }
+
         @SuppressWarnings("unchecked")
         private static Handler<MqttPublishMessage> castHandler(Object value) {
             return (Handler<MqttPublishMessage>) value;
+        }
+
+        @SuppressWarnings("unchecked")
+        private static Handler<Integer> castIntegerHandler(Object value) {
+            return (Handler<Integer>) value;
         }
     }
 

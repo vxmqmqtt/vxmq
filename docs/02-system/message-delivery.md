@@ -8,7 +8,7 @@
 
 - 定义入站 PUBLISH 的处理与投递规则。
 - 定义 SUBSCRIBE / UNSUBSCRIBE 的更新与投递副作用。
-- 定义 Topic Filter 匹配、重叠订阅去重和 QoS 1 完成语义。
+- 定义 Topic Filter 匹配、重叠订阅去重和 QoS 1 / QoS 2 完成语义。
 - 定义 retained 与 will 如何复用普通消息投递主链路。
 
 ## 投递主线
@@ -52,11 +52,12 @@ sequenceDiagram
 5. `protocol` 决定每个目标是在线立即投递、离线入队还是跳过。
 6. `transport` 查找在线 endpoint，并执行实际出站写回。
 7. QoS 1 场景下，`transport` 负责回 `PUBACK` 并接收订阅端 `PUBACK`。
+8. QoS 2 场景下，`transport` 和 `protocol/session` 协作完成 `PUBREC / PUBREL / PUBCOMP` 状态机。
 
 ### 投递规则
 
 - 只有当前仍处于活跃状态的连接会收到在线消息。
-- 若目标会话无在线连接且为持久会话，最终投递 QoS 为 1 的消息会进入离线队列。
+- 若目标会话无在线连接且为持久会话，最终投递 QoS 为 1 或 2 的消息会进入离线队列。
 - 若目标会话无在线连接且为非持久会话，当前直接跳过。
 - 若发布者同时也是订阅者，当前允许收到自己发布的消息。
 - 同一客户端命中重叠订阅时，当前只投递一次。
@@ -73,7 +74,7 @@ sequenceDiagram
 
 当前行为：
 
-- 当前支持 QoS 0 / QoS 1 订阅授予；请求 QoS 2 时当前降为 QoS 1。
+- 当前支持 QoS 0 / QoS 1 / QoS 2 订阅授予。
 - 当前 retained 下发固定发生在 SUBACK 之后。
 
 ### UNSUBSCRIBE
@@ -96,11 +97,23 @@ sequenceDiagram
 - 若连接先关闭，则未确认 inflight 消息回退为离线队列。
 - 当前不做后台超时重试。
 
+## QoS 2 语义
+
+- 当前 Broker 接受入站 QoS 2，并按 `PUBLISH -> PUBREC -> PUBREL -> PUBCOMP` 完成 exactly-once 状态机。
+- 入站 QoS 2 的 `PUBLISH` 会先保存事务并返回 `PUBREC`，不会立即路由。
+- 收到对应 `PUBREL` 后，Broker 才执行 retained 更新、订阅匹配和实际投递，并返回 `PUBCOMP`。
+- 重复 `PUBLISH(QoS2)` 会复用已保存事务并再次返回 `PUBREC`，不会重复保存 payload。
+- 重复或未知 `PUBREL` 会返回 `PUBCOMP`，但不会重复投递。
+- 在线 QoS 2 出站消息会进入目标会话 inflight 状态；订阅端 `PUBREC` 后 Broker 发送 `PUBREL`，订阅端 `PUBCOMP` 后清理 inflight。
+- 持久会话断线时，未完成的出站 QoS 2 状态会保留；重连后按阶段重发 `PUBLISH(dup=true)` 或 `PUBREL`。
+- 离线持久会话的 QoS 2 消息会排队，并在重连后转换为出站 QoS 2 inflight。
+- 当前不做后台超时重试，也不做跨 Broker 进程重启恢复。
+
 ## Retained 语义
 
 - `retain=true` 且 payload 非空时，按 Topic Name 写入或覆盖 retained store。
 - `retain=true` 且 payload 为空时，删除该 Topic Name 的 retained 记录。
-- retained 发布本身仍继续走普通在线投递或离线 QoS 1 入队路径。
+- retained 发布本身仍继续走普通在线投递或离线 QoS 1 / QoS 2 入队路径。
 - 订阅成功后，命中的 retained 消息会在 SUBACK 之后立即下发。
 - MQTT 5 的 `Retain Handling` 和 `Retain Available` 当前未实现。
 
@@ -115,6 +128,7 @@ sequenceDiagram
   - 在线投递
   - 离线持久会话的 QoS 1 入队
   - `retain=true` 时写入 retained store
+- 当前 will QoS 2 尚未纳入实现；will 解析仍将非 QoS 0 映射为 QoS 1。
 
 ## 协议版本差异
 
@@ -124,9 +138,9 @@ sequenceDiagram
 
 ## 当前实现边界
 
-- 当前支持入站和出站 QoS 0 / QoS 1。
+- 当前支持入站和出站 QoS 0 / QoS 1 / QoS 2。
 - 当前支持 retained 写入、覆盖、清除与订阅后下发。
 - 当前支持基础 will 保存、显式断连抑制和异常关闭发布。
 - 当前支持离线 QoS 1 积压与重连恢复。
-- 当前不支持 QoS 2。
+- 当前支持 retained QoS 2 存储与重放，但 will QoS 2 延后。
 - 当前不支持 Subscription Options、Subscription Identifier、共享订阅和高级 MQTT 5 will / retain 属性。

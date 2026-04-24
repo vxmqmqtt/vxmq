@@ -498,14 +498,19 @@ class VertxMqttBrokerTransportIntegrationTest {
         assertFalse(subscriber.isConnected());
     }
 
-    // Verifies that an unsupported inbound QoS triggers an abnormal disconnect.
+    // Verifies the online QoS 2 path: publisher handshake completes and subscriber receives once.
     @Test
-    void shouldCloseClientAfterUnsupportedQos2Publish() throws Exception {
+    void shouldDeliverQos2MessageToOnlineSubscriber() throws Exception {
         int port = startBroker();
-        CompletableFuture<Void> publisherClosed = new CompletableFuture<>();
+        CompletableFuture<String> receivedPayload = new CompletableFuture<>();
 
-        publisher = mqttClient("publisher-qos2");
-        publisher.closeHandler(() -> publisherClosed.complete(null));
+        subscriber = mqttClient("subscriber-qos2-online");
+        subscriber.publishHandler(message ->
+                receivedPayload.complete(message.payload().toString(StandardCharsets.UTF_8)));
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, subscriber.connect(port, "127.0.0.1").await().indefinitely().code());
+        subscriber.subscribe("sensors/+/temperature", 2).await().indefinitely();
+
+        publisher = mqttClient("publisher-qos2-online");
         assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, publisher.connect(port, "127.0.0.1").await().indefinitely().code());
 
         publisher.publish(
@@ -515,8 +520,59 @@ class VertxMqttBrokerTransportIntegrationTest {
                 false,
                 false).await().indefinitely();
 
-        publisherClosed.get(5, TimeUnit.SECONDS);
-        assertFalse(publisher.isConnected());
+        assertEquals("payload-qos2", receivedPayload.get(5, TimeUnit.SECONDS));
+    }
+
+    // Verifies that persistent subscribers receive offline QoS 2 messages after reconnect.
+    @Test
+    void shouldRestoreQueuedQos2MessageAfterReconnect() throws Exception {
+        int port = startBroker();
+        CompletableFuture<String> receivedPayload = new CompletableFuture<>();
+
+        subscriber = mqttClient("persistent-qos2-subscriber", false);
+        assertFalse(subscriber.connect(port, "127.0.0.1").await().indefinitely().isSessionPresent());
+        subscriber.subscribe("sensors/+/temperature", 2).await().indefinitely();
+        subscriber.disconnect().await().indefinitely();
+
+        publisher = mqttClient("persistent-qos2-publisher");
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, publisher.connect(port, "127.0.0.1").await().indefinitely().code());
+        publisher.publish(
+                "sensors/room-1/temperature",
+                Buffer.buffer("offline-qos2-payload"),
+                MqttQoS.EXACTLY_ONCE,
+                false,
+                false).await().indefinitely();
+
+        subscriber = mqttClient("persistent-qos2-subscriber", false);
+        subscriber.publishHandler(message ->
+                receivedPayload.complete(message.payload().toString(StandardCharsets.UTF_8)));
+        assertTrue(subscriber.connect(port, "127.0.0.1").await().indefinitely().isSessionPresent());
+
+        assertEquals("offline-qos2-payload", receivedPayload.get(5, TimeUnit.SECONDS));
+    }
+
+    // Verifies that retained QoS 2 messages replay to a QoS 2 subscriber.
+    @Test
+    void shouldReplayRetainedQos2MessageAfterSubscribe() throws Exception {
+        int port = startBroker();
+        CompletableFuture<String> receivedPayload = new CompletableFuture<>();
+
+        publisher = mqttClient("publisher-retained-qos2");
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, publisher.connect(port, "127.0.0.1").await().indefinitely().code());
+        publisher.publish(
+                "sensors/room-1/temperature",
+                Buffer.buffer("retained-qos2-payload"),
+                MqttQoS.EXACTLY_ONCE,
+                false,
+                true).await().indefinitely();
+
+        subscriber = mqttClient("subscriber-retained-qos2");
+        subscriber.publishHandler(message ->
+                receivedPayload.complete(message.payload().toString(StandardCharsets.UTF_8)));
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, subscriber.connect(port, "127.0.0.1").await().indefinitely().code());
+        subscriber.subscribe("sensors/+/temperature", 2).await().indefinitely();
+
+        assertEquals("retained-qos2-payload", receivedPayload.get(5, TimeUnit.SECONDS));
     }
 
     private int startBroker() {

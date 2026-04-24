@@ -5,8 +5,11 @@ import io.github.vxmqmqtt.vxmq.observability.BrokerEventSink;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectDecision;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishDelivery;
+import io.github.vxmqmqtt.vxmq.protocol.model.PubRecResult;
+import io.github.vxmqmqtt.vxmq.protocol.model.PubRelResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishResult;
+import io.github.vxmqmqtt.vxmq.protocol.model.SessionResumeResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscribeResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionItem;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionItemResult;
@@ -21,7 +24,9 @@ import io.github.vxmqmqtt.vxmq.routing.SubscriptionBinding;
 import io.github.vxmqmqtt.vxmq.routing.SubscriptionRegistry;
 import io.github.vxmqmqtt.vxmq.routing.MqttTopicSupport;
 import io.github.vxmqmqtt.vxmq.session.ClientSession;
+import io.github.vxmqmqtt.vxmq.session.InboundQos2Message;
 import io.github.vxmqmqtt.vxmq.session.InflightMessage;
+import io.github.vxmqmqtt.vxmq.session.OutboundQos2State;
 import io.github.vxmqmqtt.vxmq.session.QueuedMessage;
 import io.github.vxmqmqtt.vxmq.session.SessionOpenRequest;
 import io.github.vxmqmqtt.vxmq.session.SessionOpenResult;
@@ -34,6 +39,7 @@ import io.netty.handler.codec.mqtt.MqttProperties;
 import io.netty.handler.codec.mqtt.MqttQoS;
 import io.vertx.mqtt.messages.codes.MqttDisconnectReasonCode;
 import io.vertx.mqtt.messages.codes.MqttPubAckReasonCode;
+import io.vertx.mqtt.messages.codes.MqttPubRecReasonCode;
 import io.vertx.mqtt.messages.codes.MqttSubAckReasonCode;
 import io.vertx.mqtt.messages.codes.MqttUnsubAckReasonCode;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -183,11 +189,35 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             return PublishResult.rejectedWithDisconnect(MqttDisconnectReasonCode.TOPIC_NAME_INVALID);
         }
 
-        if (request.qos() < 0 || request.qos() > 1) {
+        if (request.qos() < 0 || request.qos() > 2) {
             brokerEventSink.protocolWarning(connection, "Rejected unsupported inbound QoS: " + request.qos());
             return PublishResult.rejectedWithDisconnect(MqttDisconnectReasonCode.QOS_NOT_SUPPORTED);
         }
 
+        if (request.qos() == 2) {
+            if (connection.effectiveClientId() == null || request.packetId() <= 0) {
+                brokerEventSink.protocolWarning(connection, "Rejected QoS 2 publish without a packet id");
+                return PublishResult.rejectedWithDisconnect(MqttDisconnectReasonCode.PROTOCOL_ERROR);
+            }
+            sessionRegistry.startInboundQos2Message(
+                    connection.effectiveClientId(),
+                    request.packetId(),
+                    request.topicName(),
+                    request.payload(),
+                    request.retain(),
+                    request.duplicate());
+            return PublishResult.qos2Received(MqttPubRecReasonCode.SUCCESS);
+        }
+
+        PublishRoutingResult routingResult = routePublish(connection, request);
+        return PublishResult.accepted(
+                routingResult.deliveries(),
+                routingResult.queuedMessageCount(),
+                request.qos() == 1,
+                request.qos() == 1 ? MqttPubAckReasonCode.SUCCESS : null);
+    }
+
+    private PublishRoutingResult routePublish(ClientConnection connection, PublishRequest request) {
         updateRetainedMessageIfRequested(request);
 
         List<PublishDelivery> deliveries = new ArrayList<>();
@@ -215,7 +245,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                                 binding.clientId(),
                                 request.topicName(),
                                 request.payload(),
-                                MqttQoS.AT_LEAST_ONCE,
+                                deliveryQos,
                                 request.retain(),
                                 false,
                                 false)
@@ -229,7 +259,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 sessionRegistry.enqueueOfflineMessage(binding.clientId(), new QueuedMessage(
                         request.topicName(),
                         copyPayload(request.payload()),
-                        MqttQoS.AT_LEAST_ONCE,
+                        deliveryQos,
                         request.retain(),
                         false));
                 queuedMessageCount++;
@@ -238,34 +268,87 @@ public class DefaultProtocolEngine implements ProtocolEngine {
 
         int matchedClients = deliveries.size() + queuedMessageCount;
         brokerEventSink.messageRouted(connection, request.topicName(), matchedClients);
-        return PublishResult.accepted(
-                deliveries,
-                queuedMessageCount,
-                request.qos() == 1,
-                request.qos() == 1 ? MqttPubAckReasonCode.SUCCESS : null);
+        return new PublishRoutingResult(deliveries, queuedMessageCount);
     }
 
     @Override
-    public List<PublishDelivery> handleSessionResume(ClientConnection connection) {
+    public SessionResumeResult handleSessionResume(ClientConnection connection) {
         if (connection.effectiveClientId() == null) {
-            return List.of();
+            return SessionResumeResult.empty();
         }
 
         ClientSession session = sessionRegistry.find(connection.effectiveClientId()).orElse(null);
         if (session == null || !connection.connectionId().equals(session.connectionId())) {
-            return List.of();
+            return SessionResumeResult.empty();
         }
 
-        return sessionRegistry.drainQueuedMessages(connection.effectiveClientId())
-                .stream()
-                .map(inflightMessage -> toPublishDelivery(connection.effectiveClientId(), inflightMessage))
+        List<InflightMessage> drainedMessages = sessionRegistry.drainQueuedMessages(connection.effectiveClientId());
+        List<Integer> drainedPacketIds = drainedMessages.stream()
+                .map(InflightMessage::packetId)
                 .toList();
+        List<PublishDelivery> deliveries = new ArrayList<>(drainedMessages.stream()
+                .map(inflightMessage -> toPublishDelivery(connection.effectiveClientId(), inflightMessage))
+                .toList());
+        List<Integer> qos2PubRelPacketIds = new ArrayList<>();
+        for (InflightMessage inflightMessage : sessionRegistry.outboundQos2InflightMessages(connection.effectiveClientId())) {
+            if (drainedPacketIds.contains(inflightMessage.packetId())) {
+                continue;
+            }
+            if (inflightMessage.qos2State() == OutboundQos2State.PUBREL_SENT) {
+                qos2PubRelPacketIds.add(inflightMessage.packetId());
+            } else {
+                deliveries.add(toPublishDelivery(connection.effectiveClientId(), inflightMessage));
+            }
+        }
+        return new SessionResumeResult(deliveries, qos2PubRelPacketIds);
     }
 
     @Override
     public void handlePubAck(ClientConnection connection, int packetId) {
         if (connection.effectiveClientId() != null) {
             sessionRegistry.acknowledge(connection.effectiveClientId(), packetId);
+        }
+    }
+
+    @Override
+    public PubRelResult handlePubRel(ClientConnection connection, int packetId) {
+        if (connection.effectiveClientId() == null) {
+            return PubRelResult.alreadyComplete();
+        }
+
+        InboundQos2Message inboundMessage = sessionRegistry.completeInboundQos2Message(
+                        connection.effectiveClientId(),
+                        packetId)
+                .orElse(null);
+        if (inboundMessage == null) {
+            return PubRelResult.alreadyComplete();
+        }
+
+        PublishRoutingResult routingResult = routePublish(connection, new PublishRequest(
+                inboundMessage.topicName(),
+                inboundMessage.packetId(),
+                2,
+                inboundMessage.retain(),
+                inboundMessage.duplicate(),
+                inboundMessage.payloadCopy()));
+        return PubRelResult.complete(routingResult.deliveries(), routingResult.queuedMessageCount());
+    }
+
+    @Override
+    public PubRecResult handlePubRec(ClientConnection connection, int packetId) {
+        if (connection.effectiveClientId() == null) {
+            return PubRecResult.unknownPacketId();
+        }
+
+        return sessionRegistry.markOutboundQos2PubRec(connection.effectiveClientId(), packetId)
+                .map(ignored -> PubRecResult.release())
+                .orElseGet(PubRecResult::unknownPacketId);
+    }
+
+    @Override
+    public void handlePubComp(ClientConnection connection, int packetId) {
+        if (connection.effectiveClientId() != null) {
+            sessionRegistry.completeOutboundQos2(connection.effectiveClientId(), packetId);
         }
     }
 
@@ -367,12 +450,18 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         if (requestedQos <= 0) {
             return MqttQoS.AT_MOST_ONCE;
         }
+        if (requestedQos == 2) {
+            return MqttQoS.EXACTLY_ONCE;
+        }
         return MqttQoS.AT_LEAST_ONCE;
     }
 
     private MqttQoS grantedDeliveryQos(int publishQos, MqttQoS subscriptionQos) {
         int value = Math.min(publishQos, subscriptionQos.value());
-        return value == 0 ? MqttQoS.AT_MOST_ONCE : MqttQoS.AT_LEAST_ONCE;
+        if (value <= 0) {
+            return MqttQoS.AT_MOST_ONCE;
+        }
+        return value == 1 ? MqttQoS.AT_LEAST_ONCE : MqttQoS.EXACTLY_ONCE;
     }
 
     private void updateRetainedMessageIfRequested(PublishRequest request) {
@@ -388,7 +477,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         retainedMessageRegistry.putRetained(
                 request.topicName(),
                 request.payload(),
-                request.qos() == 0 ? MqttQoS.AT_MOST_ONCE : MqttQoS.AT_LEAST_ONCE);
+                grantedDeliveryQos(request.qos(), MqttQoS.EXACTLY_ONCE));
     }
 
     private List<PublishDelivery> buildRetainedDeliveries(String clientId, String topicFilter, MqttQoS grantedQos) {
@@ -412,7 +501,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                             clientId,
                             retainedMessage.topicName(),
                             retainedMessage.payloadCopy(),
-                            MqttQoS.AT_LEAST_ONCE,
+                            deliveryQos,
                             true,
                             false,
                             false)
@@ -436,6 +525,9 @@ public class DefaultProtocolEngine implements ProtocolEngine {
 
     private byte[] copyPayload(byte[] payload) {
         return payload == null ? null : payload.clone();
+    }
+
+    private record PublishRoutingResult(List<PublishDelivery> deliveries, int queuedMessageCount) {
     }
 
     private void clearRoutingBindings(ClientSession clearedSession) {

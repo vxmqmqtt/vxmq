@@ -164,6 +164,92 @@ class InMemorySessionRegistryTest {
         assertEquals(0, sessionRegistry.find("inflight-client").orElseThrow().inflightMessageCount());
     }
 
+    // Verifies that inbound QoS 2 publishes are tracked by publisher packet id until PUBREL.
+    @Test
+    void shouldTrackAndCompleteInboundQos2Transaction() {
+        sessionRegistry.openSession(
+                "qos2-publisher",
+                new SessionOpenRequest(false, true, null, "connection-1", null));
+
+        InboundQos2Message first = sessionRegistry.startInboundQos2Message(
+                        "qos2-publisher",
+                        9,
+                        "sensors/room-1/temperature",
+                        "first".getBytes(),
+                        false,
+                        false)
+                .orElseThrow();
+        InboundQos2Message duplicate = sessionRegistry.startInboundQos2Message(
+                        "qos2-publisher",
+                        9,
+                        "sensors/room-1/temperature",
+                        "second".getBytes(),
+                        false,
+                        true)
+                .orElseThrow();
+
+        assertEquals("first", new String(first.payloadCopy()));
+        assertEquals("first", new String(duplicate.payloadCopy()));
+        assertEquals(1, sessionRegistry.find("qos2-publisher").orElseThrow().inboundQos2MessageCount());
+        assertEquals(first, sessionRegistry.completeInboundQos2Message("qos2-publisher", 9).orElseThrow());
+        assertEquals(0, sessionRegistry.find("qos2-publisher").orElseThrow().inboundQos2MessageCount());
+    }
+
+    // Verifies that outbound QoS 2 deliveries move from PUBLISH_SENT to PUBREL_SENT and clear on PUBCOMP.
+    @Test
+    void shouldAdvanceOutboundQos2InflightState() {
+        sessionRegistry.openSession(
+                "qos2-subscriber",
+                new SessionOpenRequest(false, true, null, "connection-1", null));
+
+        InflightMessage inflightMessage = sessionRegistry.createInflightMessage(
+                        "qos2-subscriber",
+                        "sensors/room-1/temperature",
+                        "payload".getBytes(),
+                        MqttQoS.EXACTLY_ONCE,
+                        false,
+                        false,
+                        false)
+                .orElseThrow();
+
+        assertEquals(OutboundQos2State.PUBLISH_SENT, inflightMessage.qos2State());
+        InflightMessage afterPubRec = sessionRegistry.markOutboundQos2PubRec(
+                        "qos2-subscriber",
+                        inflightMessage.packetId())
+                .orElseThrow();
+
+        assertEquals(OutboundQos2State.PUBREL_SENT, afterPubRec.qos2State());
+        assertTrue(sessionRegistry.completeOutboundQos2("qos2-subscriber", inflightMessage.packetId()));
+        assertEquals(0, sessionRegistry.find("qos2-subscriber").orElseThrow().inflightMessageCount());
+    }
+
+    // Verifies that persistent closes keep outbound QoS 2 stage while requeueing only QoS 1 messages.
+    @Test
+    void shouldKeepOutboundQos2InflightAcrossPersistentClose() {
+        sessionRegistry.openSession(
+                "persistent-qos2",
+                new SessionOpenRequest(false, true, null, "connection-1", null));
+        InflightMessage qos2 = sessionRegistry.createInflightMessage(
+                        "persistent-qos2",
+                        "sensors/room-1/temperature",
+                        "payload".getBytes(),
+                        MqttQoS.EXACTLY_ONCE,
+                        false,
+                        false,
+                        false)
+                .orElseThrow();
+        sessionRegistry.markOutboundQos2PubRec("persistent-qos2", qos2.packetId());
+
+        sessionRegistry.onConnectionClosed("persistent-qos2", "connection-1");
+
+        ClientSession session = sessionRegistry.find("persistent-qos2").orElseThrow();
+        assertEquals(1, session.inflightMessageCount());
+        assertEquals(0, session.queuedMessageCount());
+        InflightMessage resumed = sessionRegistry.outboundQos2InflightMessages("persistent-qos2").getFirst();
+        assertTrue(resumed.duplicate());
+        assertEquals(OutboundQos2State.PUBREL_SENT, resumed.qos2State());
+    }
+
     // Verifies that persistent sessions move unacknowledged inflight deliveries back to the offline queue on close.
     @Test
     void shouldRequeueInflightMessagesWhenPersistentConnectionCloses() {

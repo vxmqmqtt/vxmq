@@ -68,7 +68,7 @@
 
 | ID | 条目 | 当前状态 | 完成标准 |
 | --- | --- | --- | --- |
-| M3-01 | QoS 2 状态机（PUBREC / PUBREL / PUBCOMP） | 未开始 | 协议状态机闭环可用；包含重复包与重连场景单测/集成测试；更新协议文档 |
+| M3-01 | QoS 2 状态机（PUBREC / PUBREL / PUBCOMP） | 已完成 | 协议状态机闭环可用；包含重复包与重连场景单测/集成测试；更新协议文档 |
 | M3-02 | Subscription Options（No Local / Retain As Published / Retain Handling） | 未开始 | 订阅存储与投递行为符合 MQTT 5 语义；保留消息下发行为与选项联动；测试覆盖主要组合 |
 | M3-03 | Subscription Identifier | 未开始 | 订阅时可绑定标识并在下发中体现；去重与多订阅场景行为清晰；测试覆盖 |
 | M3-04 | User Property 透传 | 未开始 | 入站/出站链路属性透传行为明确；不支持场景有显式限制；测试覆盖 |

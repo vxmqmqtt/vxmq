@@ -228,17 +228,17 @@ class DefaultProtocolEngineTest {
         assertTrue(sessionRegistry.find("mqtt5-ephemeral").isEmpty());
     }
 
-    // Verifies that subscriptions requesting QoS 1 or above are currently granted QoS 1.
+    // Verifies that subscriptions requesting QoS 2 are granted exactly once delivery.
     @Test
-    void shouldGrantQos1ForSupportedSubscription() {
+    void shouldGrantQos2ForSupportedSubscription() {
         ClientConnection connection = connectClient("client-sub", 5, true, false, 0L);
 
         SubscribeResult result = protocolEngine.handleSubscribe(connection, new SubscriptionRequest(List.of(
                 new SubscriptionItem("sensors/+/temperature", 2))));
 
         assertEquals(1, result.itemResults().size());
-        assertEquals(MqttQoS.AT_LEAST_ONCE, result.itemResults().getFirst().grantedQos());
-        assertEquals(MqttSubAckReasonCode.GRANTED_QOS1, result.itemResults().getFirst().reasonCode());
+        assertEquals(MqttQoS.EXACTLY_ONCE, result.itemResults().getFirst().grantedQos());
+        assertEquals(MqttSubAckReasonCode.GRANTED_QOS2, result.itemResults().getFirst().reasonCode());
         assertTrue(sessionRegistry.find("client-sub").orElseThrow().subscriptions().contains("sensors/+/temperature"));
         assertEquals(1, subscriptionRegistry.match("sensors/room-1/temperature").size());
     }
@@ -469,13 +469,122 @@ class DefaultProtocolEngineTest {
 
         ClientConnection secondSubscriberConnection = connectClient("subscriber-qos1-resume", 5, false, false, 60L);
         List<io.github.vxmqmqtt.vxmq.protocol.model.PublishDelivery> resumedDeliveries =
-                protocolEngine.handleSessionResume(secondSubscriberConnection);
+                protocolEngine.handleSessionResume(secondSubscriberConnection).deliveries();
 
         assertEquals(1, resumedDeliveries.size());
         assertTrue(resumedDeliveries.getFirst().fromOfflineQueue());
         assertEquals(MqttQoS.AT_LEAST_ONCE, resumedDeliveries.getFirst().grantedQos());
         assertEquals(1, sessionRegistry.find("subscriber-qos1-resume").orElseThrow().inflightMessageCount());
         assertEquals(0, sessionRegistry.find("subscriber-qos1-resume").orElseThrow().queuedMessageCount());
+    }
+
+    // Verifies that inbound QoS 2 publish is routed only after PUBREL and duplicate PUBREL does not re-deliver.
+    @Test
+    void shouldRouteQos2PublishOnlyAfterPubRel() {
+        ClientConnection publisher = connectClient("publisher-qos2-inbound", 5, true, false, 0L);
+        ClientConnection subscriber = connectClient("subscriber-qos2-inbound", 5, false, false, 60L);
+        protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 2))));
+
+        PublishResult publishResult = protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                45,
+                2,
+                false,
+                false,
+                "payload-qos2".getBytes()));
+
+        assertTrue(publishResult.accepted());
+        assertTrue(publishResult.publishReceived());
+        assertTrue(publishResult.deliveries().isEmpty());
+        assertEquals(1, sessionRegistry.find("publisher-qos2-inbound").orElseThrow().inboundQos2MessageCount());
+
+        var pubRelResult = protocolEngine.handlePubRel(publisher, 45);
+
+        assertEquals(1, pubRelResult.deliveries().size());
+        assertEquals(MqttQoS.EXACTLY_ONCE, pubRelResult.deliveries().getFirst().grantedQos());
+        assertEquals(0, sessionRegistry.find("publisher-qos2-inbound").orElseThrow().inboundQos2MessageCount());
+        assertEquals(1, sessionRegistry.find("subscriber-qos2-inbound").orElseThrow().inflightMessageCount());
+        assertTrue(protocolEngine.handlePubRel(publisher, 45).deliveries().isEmpty());
+    }
+
+    // Verifies that outbound QoS 2 advances on PUBREC and clears on PUBCOMP.
+    @Test
+    void shouldAdvanceOutboundQos2OnPubRecAndPubComp() {
+        ClientConnection publisher = connectClient("publisher-qos2-outbound", 5, true, false, 0L);
+        ClientConnection subscriber = connectClient("subscriber-qos2-outbound", 5, false, false, 60L);
+        protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 2))));
+
+        protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                46,
+                2,
+                false,
+                false,
+                "payload-qos2".getBytes()));
+        PublishDelivery delivery = protocolEngine.handlePubRel(publisher, 46).deliveries().getFirst();
+
+        assertTrue(protocolEngine.handlePubRec(subscriber, delivery.packetId()).publishRelease());
+        assertEquals(1, sessionRegistry.find("subscriber-qos2-outbound").orElseThrow().inflightMessageCount());
+
+        protocolEngine.handlePubComp(subscriber, delivery.packetId());
+
+        assertEquals(0, sessionRegistry.find("subscriber-qos2-outbound").orElseThrow().inflightMessageCount());
+    }
+
+    // Verifies that QoS 2 messages for offline persistent subscribers are restored after reconnect.
+    @Test
+    void shouldResumeQueuedQos2MessageAfterReconnect() {
+        ClientConnection publisher = connectClient("publisher-qos2-resume", 5, true, false, 0L);
+        ClientConnection firstSubscriberConnection = connectClient("subscriber-qos2-resume", 5, false, false, 60L);
+        protocolEngine.handleSubscribe(firstSubscriberConnection, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 2))));
+        closeClientConnection(firstSubscriberConnection);
+
+        protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                47,
+                2,
+                false,
+                false,
+                "payload-qos2".getBytes()));
+        protocolEngine.handlePubRel(publisher, 47);
+
+        ClientConnection secondSubscriberConnection = connectClient("subscriber-qos2-resume", 5, false, false, 60L);
+        var resumeResult = protocolEngine.handleSessionResume(secondSubscriberConnection);
+
+        assertEquals(1, resumeResult.deliveries().size());
+        assertEquals(MqttQoS.EXACTLY_ONCE, resumeResult.deliveries().getFirst().grantedQos());
+        assertTrue(resumeResult.deliveries().getFirst().fromOfflineQueue());
+        assertEquals(1, sessionRegistry.find("subscriber-qos2-resume").orElseThrow().inflightMessageCount());
+    }
+
+    // Verifies that retained QoS 2 messages are stored and replayed through QoS 2 inflight state.
+    @Test
+    void shouldReplayRetainedQos2MessageAfterSubscribe() {
+        ClientConnection publisher = connectClient("publisher-retained-qos2", 5, true, false, 0L);
+        protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                48,
+                2,
+                true,
+                false,
+                "retained-qos2".getBytes()));
+        protocolEngine.handlePubRel(publisher, 48);
+
+        assertEquals(MqttQoS.EXACTLY_ONCE,
+                retainedMessageRegistry.findExact("sensors/room-1/temperature").orElseThrow().qos());
+
+        ClientConnection subscriber = connectClient("subscriber-retained-qos2", 5, false, false, 60L);
+        SubscribeResult subscribeResult = protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 2))));
+
+        assertEquals(1, subscribeResult.retainedDeliveries().size());
+        PublishDelivery retainedDelivery = subscribeResult.retainedDeliveries().getFirst();
+        assertEquals(MqttQoS.EXACTLY_ONCE, retainedDelivery.grantedQos());
+        assertNotNull(retainedDelivery.packetId());
+        assertEquals(1, sessionRegistry.find("subscriber-retained-qos2").orElseThrow().inflightMessageCount());
     }
 
     // Verifies that offline non-persistent sessions do not retain QoS 1 messages for later delivery.
@@ -518,15 +627,15 @@ class DefaultProtocolEngineTest {
         assertEquals(MqttDisconnectReasonCode.TOPIC_NAME_INVALID, result.disconnectReasonCode());
     }
 
-    // Verifies that inbound QoS levels above the current QoS 1 support boundary are rejected.
+    // Verifies that inbound QoS levels above the MQTT QoS 2 boundary are rejected.
     @Test
-    void shouldRejectPublishWithUnsupportedQos2() {
-        ClientConnection publisher = connectClient("publisher-qos2", 5, true, false, 0L);
+    void shouldRejectPublishWithUnsupportedQos3() {
+        ClientConnection publisher = connectClient("publisher-qos3", 5, true, false, 0L);
 
         PublishResult result = protocolEngine.handlePublish(publisher, new PublishRequest(
                 "sensors/room-1/temperature",
                 25,
-                2,
+                3,
                 false,
                 false,
                 "payload".getBytes()));

@@ -151,6 +151,44 @@ public class InMemorySessionRegistry implements SessionRegistry {
     }
 
     @Override
+    public Optional<InboundQos2Message> startInboundQos2Message(
+            String clientId,
+            int packetId,
+            String topicName,
+            byte[] payload,
+            boolean retain,
+            boolean duplicate) {
+        return find(clientId)
+                .map(session -> session.startInboundQos2Message(packetId, topicName, payload, retain, duplicate));
+    }
+
+    @Override
+    public Optional<InboundQos2Message> completeInboundQos2Message(String clientId, int packetId) {
+        return find(clientId)
+                .map(session -> session.completeInboundQos2Message(packetId));
+    }
+
+    @Override
+    public Optional<InflightMessage> markOutboundQos2PubRec(String clientId, int packetId) {
+        return find(clientId)
+                .map(session -> session.markOutboundQos2PubRec(packetId));
+    }
+
+    @Override
+    public boolean completeOutboundQos2(String clientId, int packetId) {
+        return find(clientId)
+                .map(session -> session.completeOutboundQos2(packetId))
+                .orElse(false);
+    }
+
+    @Override
+    public List<InflightMessage> outboundQos2InflightMessages(String clientId) {
+        return find(clientId)
+                .map(ClientSession::outboundQos2InflightMessages)
+                .orElseGet(List::of);
+    }
+
+    @Override
     public boolean acknowledge(String clientId, int packetId) {
         return find(clientId)
                 .map(session -> session.acknowledge(packetId))

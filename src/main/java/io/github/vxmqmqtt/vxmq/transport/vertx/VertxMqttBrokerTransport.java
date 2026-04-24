@@ -8,6 +8,9 @@ import io.github.vxmqmqtt.vxmq.protocol.model.ConnectRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishDelivery;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishResult;
+import io.github.vxmqmqtt.vxmq.protocol.model.PubRecResult;
+import io.github.vxmqmqtt.vxmq.protocol.model.PubRelResult;
+import io.github.vxmqmqtt.vxmq.protocol.model.SessionResumeResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscribeResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionItem;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionRequest;
@@ -20,6 +23,7 @@ import io.github.vxmqmqtt.vxmq.transport.ClientConnectionRegistry;
 import io.netty.handler.codec.mqtt.MqttProperties;
 import io.smallrye.mutiny.Uni;
 import io.vertx.mqtt.messages.codes.MqttDisconnectReasonCode;
+import io.vertx.mqtt.messages.codes.MqttPubRelReasonCode;
 import io.vertx.mqtt.MqttAuth;
 import io.vertx.mqtt.MqttWill;
 import io.vertx.mqtt.MqttServerOptions;
@@ -115,7 +119,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
         if (decision.supersededConnectionId() != null) {
             closeSupersededConnection(decision.supersededConnectionId());
         }
-        protocolEngine.handleSessionResume(connection).forEach(this::sendPublishToSubscriber);
+        sendSessionResume(protocolEngine.handleSessionResume(connection), endpoint);
     }
 
     private void installHandlers(ClientConnection connection, MqttEndpoint endpoint) {
@@ -140,6 +144,9 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
 
             if (publishResult.publishAcknowledge()) {
                 acknowledgeInboundPublish(endpoint, message.messageId(), connection.protocolVersion(), publishResult);
+            }
+            if (publishResult.publishReceived()) {
+                receiveInboundPublish(endpoint, message.messageId(), connection.protocolVersion(), publishResult);
             }
 
             // Delivery fan-out stays in the transport because it needs access to live endpoints.
@@ -182,6 +189,18 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
 
         endpoint.disconnectHandler(() -> protocolEngine.handleDisconnect(connection));
         endpoint.publishAcknowledgeHandler(packetId -> protocolEngine.handlePubAck(connection, packetId));
+        endpoint.publishReleaseHandler(packetId -> {
+            PubRelResult pubRelResult = protocolEngine.handlePubRel(connection, packetId);
+            pubRelResult.deliveries().forEach(this::sendPublishToSubscriber);
+            completeInboundPublish(endpoint, packetId, connection.protocolVersion(), pubRelResult);
+        });
+        endpoint.publishReceivedHandler(packetId -> {
+            PubRecResult pubRecResult = protocolEngine.handlePubRec(connection, packetId);
+            if (pubRecResult.publishRelease()) {
+                releaseOutboundPublish(endpoint, packetId, connection.protocolVersion(), pubRecResult.reasonCode());
+            }
+        });
+        endpoint.publishCompletionHandler(packetId -> protocolEngine.handlePubComp(connection, packetId));
         endpoint.closeHandler(() -> {
             endpointsByConnectionId.remove(connection.connectionId());
             connectionRegistry.close(connection.connectionId());
@@ -244,6 +263,12 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                                                         .formatted(delivery.clientId(), failure.getMessage()))));
     }
 
+    private void sendSessionResume(SessionResumeResult resumeResult, MqttEndpoint endpoint) {
+        resumeResult.deliveries().forEach(this::sendPublishToSubscriber);
+        resumeResult.qos2PubRelPacketIds().forEach(packetId ->
+                releaseOutboundPublish(endpoint, packetId, endpoint.protocolVersion(), MqttPubRelReasonCode.SUCCESS));
+    }
+
     private void disconnectForInvalidPublish(
             ClientConnection connection,
             MqttEndpoint endpoint,
@@ -268,9 +293,45 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
         endpoint.publishAcknowledge(packetId);
     }
 
+    private void receiveInboundPublish(
+            MqttEndpoint endpoint,
+            int packetId,
+            int protocolVersion,
+            PublishResult publishResult) {
+        if (protocolVersion == 5) {
+            endpoint.publishReceived(packetId, publishResult.pubRecReasonCode(), MqttProperties.NO_PROPERTIES);
+            return;
+        }
+        endpoint.publishReceived(packetId);
+    }
+
+    private void completeInboundPublish(
+            MqttEndpoint endpoint,
+            int packetId,
+            int protocolVersion,
+            PubRelResult pubRelResult) {
+        if (protocolVersion == 5) {
+            endpoint.publishComplete(packetId, pubRelResult.reasonCode(), MqttProperties.NO_PROPERTIES);
+            return;
+        }
+        endpoint.publishComplete(packetId);
+    }
+
+    private void releaseOutboundPublish(
+            MqttEndpoint endpoint,
+            int packetId,
+            int protocolVersion,
+            MqttPubRelReasonCode reasonCode) {
+        if (protocolVersion == 5) {
+            endpoint.publishRelease(packetId, reasonCode, MqttProperties.NO_PROPERTIES);
+            return;
+        }
+        endpoint.publishRelease(packetId);
+    }
+
     private Uni<Integer> outboundPublish(MqttEndpoint endpoint, PublishDelivery delivery) {
         Buffer payload = delivery.payload() == null ? Buffer.buffer() : Buffer.buffer(delivery.payloadCopy());
-        if (delivery.grantedQos() == io.netty.handler.codec.mqtt.MqttQoS.AT_LEAST_ONCE && delivery.packetId() != null) {
+        if (delivery.grantedQos().value() > 0 && delivery.packetId() != null) {
             return endpoint.publish(
                     delivery.topicName(),
                     payload,

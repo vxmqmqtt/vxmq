@@ -26,6 +26,7 @@ public final class ClientSession {
     private final Map<String, MqttQoS> subscriptions = new ConcurrentHashMap<>();
     private final Deque<QueuedMessage> queuedMessages = new ArrayDeque<>();
     private final Map<Integer, InflightMessage> inflightMessages = new LinkedHashMap<>();
+    private final Map<Integer, InboundQos2Message> inboundQos2Messages = new LinkedHashMap<>();
     private volatile WillMessage willMessage;
     private int nextPacketId = 1;
 
@@ -138,10 +139,17 @@ public final class ClientSession {
     }
 
     /**
-     * Returns the number of QoS 1 messages waiting for PUBACK.
+     * Returns the number of QoS 1 / QoS 2 messages waiting for subscriber acknowledgement.
      */
     public synchronized int inflightMessageCount() {
         return inflightMessages.size();
+    }
+
+    /**
+     * Returns the number of inbound QoS 2 messages waiting for PUBREL.
+     */
+    public synchronized int inboundQos2MessageCount() {
+        return inboundQos2Messages.size();
     }
 
     /**
@@ -160,7 +168,7 @@ public final class ClientSession {
     }
 
     /**
-     * Creates one inflight record for an immediately delivered QoS 1 message.
+     * Creates one inflight record for an immediately delivered QoS 1 or QoS 2 message.
      */
     public synchronized InflightMessage createInflightMessage(
             String topicName,
@@ -170,6 +178,7 @@ public final class ClientSession {
             boolean duplicate,
             boolean fromOfflineQueue) {
         int packetId = allocatePacketId();
+        OutboundQos2State qos2State = qos == MqttQoS.EXACTLY_ONCE ? OutboundQos2State.PUBLISH_SENT : null;
         InflightMessage inflightMessage = new InflightMessage(
                 packetId,
                 topicName,
@@ -177,7 +186,8 @@ public final class ClientSession {
                 qos,
                 retain,
                 duplicate,
-                fromOfflineQueue);
+                fromOfflineQueue,
+                qos2State);
         inflightMessages.put(packetId, inflightMessage);
         return inflightMessage;
     }
@@ -201,18 +211,92 @@ public final class ClientSession {
     }
 
     /**
-     * Marks one QoS 1 packet as acknowledged by the subscriber.
+     * Starts or reuses one inbound QoS 2 transaction for a publisher packet id.
      */
-    public synchronized boolean acknowledge(int packetId) {
-        return inflightMessages.remove(packetId) != null;
+    public synchronized InboundQos2Message startInboundQos2Message(
+            int packetId,
+            String topicName,
+            byte[] payload,
+            boolean retain,
+            boolean duplicate) {
+        return inboundQos2Messages.computeIfAbsent(packetId, ignored -> new InboundQos2Message(
+                packetId,
+                topicName,
+                payload == null ? null : payload.clone(),
+                retain,
+                duplicate));
     }
 
     /**
-     * Moves all unacknowledged inflight messages back to the front of the offline queue.
+     * Completes one inbound QoS 2 transaction after PUBREL.
+     */
+    public synchronized InboundQos2Message completeInboundQos2Message(int packetId) {
+        return inboundQos2Messages.remove(packetId);
+    }
+
+    /**
+     * Marks one outbound QoS 2 packet as ready for PUBREL.
+     */
+    public synchronized InflightMessage markOutboundQos2PubRec(int packetId) {
+        InflightMessage inflightMessage = inflightMessages.get(packetId);
+        if (inflightMessage == null || inflightMessage.qos() != MqttQoS.EXACTLY_ONCE) {
+            return null;
+        }
+        InflightMessage updated = inflightMessage.withQos2State(OutboundQos2State.PUBREL_SENT);
+        inflightMessages.put(packetId, updated);
+        return updated;
+    }
+
+    /**
+     * Clears one outbound QoS 2 packet after PUBCOMP.
+     */
+    public synchronized boolean completeOutboundQos2(int packetId) {
+        InflightMessage inflightMessage = inflightMessages.get(packetId);
+        if (inflightMessage == null || inflightMessage.qos() != MqttQoS.EXACTLY_ONCE) {
+            return false;
+        }
+        inflightMessages.remove(packetId);
+        return true;
+    }
+
+    /**
+     * Marks outbound QoS 2 messages as duplicates and returns them for reconnect replay.
+     */
+    public synchronized List<InflightMessage> outboundQos2InflightMessages() {
+        List<InflightMessage> qos2Messages = new ArrayList<>();
+        for (Map.Entry<Integer, InflightMessage> entry : inflightMessages.entrySet()) {
+            InflightMessage inflightMessage = entry.getValue();
+            if (inflightMessage.qos() == MqttQoS.EXACTLY_ONCE) {
+                InflightMessage duplicate = inflightMessage.withDuplicate(true);
+                entry.setValue(duplicate);
+                qos2Messages.add(duplicate);
+            }
+        }
+        return qos2Messages;
+    }
+
+    /**
+     * Marks one QoS 1 packet as acknowledged by the subscriber.
+     */
+    public synchronized boolean acknowledge(int packetId) {
+        InflightMessage inflightMessage = inflightMessages.get(packetId);
+        if (inflightMessage == null || inflightMessage.qos() != MqttQoS.AT_LEAST_ONCE) {
+            return false;
+        }
+        inflightMessages.remove(packetId);
+        return true;
+    }
+
+    /**
+     * Moves all unacknowledged QoS 1 inflight messages back to the front of the offline queue.
+     * QoS 2 inflight messages stay inflight so their handshake stage can be resumed.
      */
     public synchronized void requeueInflightMessages(int capacity) {
-        Collection<InflightMessage> snapshot = new ArrayList<>(inflightMessages.values());
-        inflightMessages.clear();
+        Collection<InflightMessage> snapshot = inflightMessages.values()
+                .stream()
+                .filter(inflightMessage -> inflightMessage.qos() == MqttQoS.AT_LEAST_ONCE)
+                .toList();
+        snapshot.forEach(inflightMessage -> inflightMessages.remove(inflightMessage.packetId()));
         List<QueuedMessage> queued = snapshot.stream()
                 .map(InflightMessage::toQueuedMessage)
                 .toList();

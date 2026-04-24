@@ -59,6 +59,37 @@ public interface SessionRegistry {
             boolean fromOfflineQueue);
 
     /**
+     * Starts or reuses an inbound QoS 2 publish transaction for the publisher packet id.
+     */
+    Optional<InboundQos2Message> startInboundQos2Message(
+            String clientId,
+            int packetId,
+            String topicName,
+            byte[] payload,
+            boolean retain,
+            boolean duplicate);
+
+    /**
+     * Completes and removes an inbound QoS 2 transaction after PUBREL.
+     */
+    Optional<InboundQos2Message> completeInboundQos2Message(String clientId, int packetId);
+
+    /**
+     * Marks an outbound QoS 2 delivery as having received PUBREC and requiring PUBREL.
+     */
+    Optional<InflightMessage> markOutboundQos2PubRec(String clientId, int packetId);
+
+    /**
+     * Clears an outbound QoS 2 delivery after PUBCOMP.
+     */
+    boolean completeOutboundQos2(String clientId, int packetId);
+
+    /**
+     * Returns unfinished outbound QoS 2 deliveries for reconnect replay.
+     */
+    List<InflightMessage> outboundQos2InflightMessages(String clientId);
+
+    /**
      * Marks one inflight QoS 1 delivery as acknowledged.
      */
     boolean acknowledge(String clientId, int packetId);

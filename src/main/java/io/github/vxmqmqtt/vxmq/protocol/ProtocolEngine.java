@@ -3,8 +3,11 @@ package io.github.vxmqmqtt.vxmq.protocol;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectDecision;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishDelivery;
+import io.github.vxmqmqtt.vxmq.protocol.model.PubRecResult;
+import io.github.vxmqmqtt.vxmq.protocol.model.PubRelResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishResult;
+import io.github.vxmqmqtt.vxmq.protocol.model.SessionResumeResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscribeResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeResult;
@@ -41,12 +44,27 @@ public interface ProtocolEngine {
     /**
      * Returns queued deliveries that should be resumed after a session reconnect succeeds.
      */
-    List<PublishDelivery> handleSessionResume(ClientConnection connection);
+    SessionResumeResult handleSessionResume(ClientConnection connection);
 
     /**
      * Completes one QoS 1 outbound delivery after the subscriber acknowledges it.
      */
     void handlePubAck(ClientConnection connection, int packetId);
+
+    /**
+     * Completes one inbound QoS 2 publish transaction after receiving PUBREL from a publisher.
+     */
+    PubRelResult handlePubRel(ClientConnection connection, int packetId);
+
+    /**
+     * Advances one outbound QoS 2 delivery after receiving PUBREC from a subscriber.
+     */
+    PubRecResult handlePubRec(ClientConnection connection, int packetId);
+
+    /**
+     * Completes one outbound QoS 2 delivery after receiving PUBCOMP from a subscriber.
+     */
+    void handlePubComp(ClientConnection connection, int packetId);
 
     /**
      * Handles an explicit MQTT DISCONNECT received from the client.
