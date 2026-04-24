@@ -2,11 +2,11 @@ package io.github.vxmqmqtt.vxmq.protocol;
 
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectDecision;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.InboundPublishOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishDelivery;
 import io.github.vxmqmqtt.vxmq.protocol.model.PubRecResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.PubRelResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishRequest;
-import io.github.vxmqmqtt.vxmq.protocol.model.PublishResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.SessionResumeResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscribeResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionRequest;
@@ -36,10 +36,9 @@ public interface ProtocolEngine {
     UnsubscribeResult handleUnsubscribe(ClientConnection connection, UnsubscribeRequest request);
 
     /**
-     * Processes an inbound PUBLISH and returns whether it was accepted, plus any deliveries,
-     * acknowledgements, or disconnect requirement produced by protocol handling.
+     * Processes an inbound PUBLISH and returns the transport-facing protocol outcome.
      */
-    PublishResult handlePublish(ClientConnection connection, PublishRequest request);
+    InboundPublishOutcome handlePublish(ClientConnection connection, PublishRequest request);
 
     /**
      * Returns queued deliveries that should be resumed after a session reconnect succeeds.

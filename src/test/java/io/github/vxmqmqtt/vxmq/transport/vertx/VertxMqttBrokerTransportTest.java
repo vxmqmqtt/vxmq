@@ -10,9 +10,12 @@ import io.github.vxmqmqtt.vxmq.observability.BrokerEventSink;
 import io.github.vxmqmqtt.vxmq.protocol.ProtocolEngine;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectDecision;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.DeliveryPlan;
+import io.github.vxmqmqtt.vxmq.protocol.model.DisconnectAction;
+import io.github.vxmqmqtt.vxmq.protocol.model.InboundPublishOutcome;
+import io.github.vxmqmqtt.vxmq.protocol.model.PublishAcknowledgement;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishDelivery;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishRequest;
-import io.github.vxmqmqtt.vxmq.protocol.model.PublishResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.PubRecResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.PubRelResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.SessionResumeResult;
@@ -69,10 +72,10 @@ class VertxMqttBrokerTransportTest {
         assertEquals(MqttProperties.NO_PROPERTIES, probe.disconnectProperties);
     }
 
-    // Verifies that rejected publishes only disconnect when PublishResult explicitly requires it.
+    // Verifies that rejected publishes only disconnect when the outcome explicitly requests it.
     @Test
     void shouldDisconnectOnlyWhenPublishResultRequestsConnectionClosure() throws Exception {
-        PublishResult rejectingWithoutDisconnect = PublishResult.rejectedWithoutDisconnect();
+        InboundPublishOutcome rejectingWithoutDisconnect = InboundPublishOutcome.rejected();
         ProtocolEngine protocolEngine = protocolEngineReturning(rejectingWithoutDisconnect);
         VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
                 null,
@@ -92,11 +95,11 @@ class VertxMqttBrokerTransportTest {
         assertFalse(probe.publishAcknowledgeCalled);
     }
 
-    // Verifies that the publish handler still disconnects when the result explicitly requests connection closure.
+    // Verifies that the publish handler still disconnects when the outcome explicitly requests connection closure.
     @Test
     void shouldDisconnectWhenPublishResultRequestsConnectionClosure() throws Exception {
-        PublishResult rejectingWithDisconnect =
-                PublishResult.rejectedWithDisconnect(MqttDisconnectReasonCode.TOPIC_NAME_INVALID);
+        InboundPublishOutcome rejectingWithDisconnect =
+                InboundPublishOutcome.rejectedWithDisconnect(MqttDisconnectReasonCode.TOPIC_NAME_INVALID);
         ProtocolEngine protocolEngine = protocolEngineReturning(rejectingWithDisconnect);
         VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
                 null,
@@ -119,7 +122,8 @@ class VertxMqttBrokerTransportTest {
     // Verifies that accepted inbound QoS 2 publishes are acknowledged with PUBREC.
     @Test
     void shouldSendPubRecForInboundQos2Publish() throws Exception {
-        ProtocolEngine protocolEngine = protocolEngineReturning(PublishResult.qos2Received(MqttPubRecReasonCode.SUCCESS));
+        ProtocolEngine protocolEngine = protocolEngineReturning(InboundPublishOutcome.deferred(
+                PublishAcknowledgement.pubRec(MqttPubRecReasonCode.SUCCESS)));
         VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
                 null,
                 runtimeConfig(),
@@ -140,7 +144,7 @@ class VertxMqttBrokerTransportTest {
     // Verifies that inbound PUBREL is completed with PUBCOMP.
     @Test
     void shouldSendPubCompForInboundPubRel() throws Exception {
-        ProtocolEngine protocolEngine = protocolEngineReturning(PublishResult.rejectedWithoutDisconnect());
+        ProtocolEngine protocolEngine = protocolEngineReturning(InboundPublishOutcome.rejected());
         VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
                 null,
                 runtimeConfig(),
@@ -160,7 +164,7 @@ class VertxMqttBrokerTransportTest {
     // Verifies that subscriber PUBREC advances outbound QoS 2 by sending PUBREL.
     @Test
     void shouldSendPubRelForOutboundPubRec() throws Exception {
-        ProtocolEngine protocolEngine = protocolEngineReturning(PublishResult.rejectedWithoutDisconnect());
+        ProtocolEngine protocolEngine = protocolEngineReturning(InboundPublishOutcome.rejected());
         VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
                 null,
                 runtimeConfig(),
@@ -261,7 +265,7 @@ class VertxMqttBrokerTransportTest {
         };
     }
 
-    private static ProtocolEngine protocolEngineReturning(PublishResult publishResult) {
+    private static ProtocolEngine protocolEngineReturning(InboundPublishOutcome publishOutcome) {
         return new ProtocolEngine() {
             @Override
             public ConnectDecision handleConnect(ClientConnection connection, ConnectRequest request) {
@@ -279,8 +283,8 @@ class VertxMqttBrokerTransportTest {
             }
 
             @Override
-            public PublishResult handlePublish(ClientConnection connection, PublishRequest request) {
-                return publishResult;
+            public InboundPublishOutcome handlePublish(ClientConnection connection, PublishRequest request) {
+                return publishOutcome;
             }
 
             @Override

@@ -5,9 +5,11 @@ import io.github.vxmqmqtt.vxmq.observability.BrokerEventSink;
 import io.github.vxmqmqtt.vxmq.protocol.ProtocolEngine;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectDecision;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.InboundPublishOutcome;
+import io.github.vxmqmqtt.vxmq.protocol.model.PublishAcknowledgement;
+import io.github.vxmqmqtt.vxmq.protocol.model.PublishAcknowledgementType;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishDelivery;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishRequest;
-import io.github.vxmqmqtt.vxmq.protocol.model.PublishResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.PubRecResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.PubRelResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.SessionResumeResult;
@@ -22,11 +24,13 @@ import io.github.vxmqmqtt.vxmq.transport.ClientConnection;
 import io.github.vxmqmqtt.vxmq.transport.ClientConnectionRegistry;
 import io.netty.handler.codec.mqtt.MqttProperties;
 import io.smallrye.mutiny.Uni;
-import io.vertx.mqtt.messages.codes.MqttDisconnectReasonCode;
-import io.vertx.mqtt.messages.codes.MqttPubRelReasonCode;
 import io.vertx.mqtt.MqttAuth;
-import io.vertx.mqtt.MqttWill;
 import io.vertx.mqtt.MqttServerOptions;
+import io.vertx.mqtt.MqttWill;
+import io.vertx.mqtt.messages.codes.MqttDisconnectReasonCode;
+import io.vertx.mqtt.messages.codes.MqttPubAckReasonCode;
+import io.vertx.mqtt.messages.codes.MqttPubRecReasonCode;
+import io.vertx.mqtt.messages.codes.MqttPubRelReasonCode;
 import io.vertx.mutiny.core.buffer.Buffer;
 import io.vertx.mutiny.core.Vertx;
 import io.vertx.mutiny.mqtt.MqttEndpoint;
@@ -125,7 +129,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
     private void installHandlers(ClientConnection connection, MqttEndpoint endpoint) {
         endpoint.publishAutoAck(false);
         endpoint.publishHandler(message -> {
-            PublishResult publishResult = protocolEngine.handlePublish(connection, new PublishRequest(
+            InboundPublishOutcome publishOutcome = protocolEngine.handlePublish(connection, new PublishRequest(
                     message.topicName(),
                     message.messageId(),
                     message.qosLevel().value(),
@@ -133,24 +137,19 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                     message.isDup(),
                     message.payload() == null ? null : message.payload().getBytes()));
 
-            if (publishResult.closeConnection()) {
-                disconnectForInvalidPublish(connection, endpoint, publishResult.disconnectReasonCode());
+            if (publishOutcome.disconnectAction().isDisconnect()) {
+                disconnectForInvalidPublish(connection, endpoint, publishOutcome.disconnectAction().reasonCode());
                 return;
             }
 
-            if (!publishResult.accepted()) {
-                return;
-            }
-
-            if (publishResult.publishAcknowledge()) {
-                acknowledgeInboundPublish(endpoint, message.messageId(), connection.protocolVersion(), publishResult);
-            }
-            if (publishResult.publishReceived()) {
-                receiveInboundPublish(endpoint, message.messageId(), connection.protocolVersion(), publishResult);
-            }
+            sendInboundPublishAcknowledgement(
+                    endpoint,
+                    message.messageId(),
+                    connection.protocolVersion(),
+                    publishOutcome.acknowledgement());
 
             // Delivery fan-out stays in the transport because it needs access to live endpoints.
-            publishResult.deliveries().forEach(this::sendPublishToSubscriber);
+            publishOutcome.deliveryPlan().deliveries().forEach(this::sendPublishToSubscriber);
         });
 
         endpoint.subscribeHandler(subscribe -> {
@@ -281,25 +280,32 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
         endpoint.close();
     }
 
-    private void acknowledgeInboundPublish(
+    private void sendInboundPublishAcknowledgement(
             MqttEndpoint endpoint,
             int packetId,
             int protocolVersion,
-            PublishResult publishResult) {
-        if (protocolVersion == 5) {
-            endpoint.publishAcknowledge(packetId, publishResult.pubAckReasonCode(), MqttProperties.NO_PROPERTIES);
+            PublishAcknowledgement acknowledgement) {
+        if (acknowledgement.type() == PublishAcknowledgementType.NONE) {
             return;
         }
-        endpoint.publishAcknowledge(packetId);
-    }
 
-    private void receiveInboundPublish(
-            MqttEndpoint endpoint,
-            int packetId,
-            int protocolVersion,
-            PublishResult publishResult) {
+        if (acknowledgement.type() == PublishAcknowledgementType.PUBACK) {
+            if (protocolVersion == 5) {
+                endpoint.publishAcknowledge(
+                        packetId,
+                        (MqttPubAckReasonCode) acknowledgement.mqtt5ReasonCode(),
+                        MqttProperties.NO_PROPERTIES);
+                return;
+            }
+            endpoint.publishAcknowledge(packetId);
+            return;
+        }
+
         if (protocolVersion == 5) {
-            endpoint.publishReceived(packetId, publishResult.pubRecReasonCode(), MqttProperties.NO_PROPERTIES);
+            endpoint.publishReceived(
+                    packetId,
+                    (MqttPubRecReasonCode) acknowledgement.mqtt5ReasonCode(),
+                    MqttProperties.NO_PROPERTIES);
             return;
         }
         endpoint.publishReceived(packetId);

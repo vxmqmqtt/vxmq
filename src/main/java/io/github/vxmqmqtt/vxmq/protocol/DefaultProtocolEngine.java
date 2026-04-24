@@ -4,11 +4,13 @@ import io.github.vxmqmqtt.vxmq.auth.AuthProvider;
 import io.github.vxmqmqtt.vxmq.observability.BrokerEventSink;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectDecision;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.DeliveryPlan;
+import io.github.vxmqmqtt.vxmq.protocol.model.InboundPublishOutcome;
+import io.github.vxmqmqtt.vxmq.protocol.model.PublishAcknowledgement;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishDelivery;
 import io.github.vxmqmqtt.vxmq.protocol.model.PubRecResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.PubRelResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishRequest;
-import io.github.vxmqmqtt.vxmq.protocol.model.PublishResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.SessionResumeResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscribeResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionItem;
@@ -183,21 +185,21 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     }
 
     @Override
-    public PublishResult handlePublish(ClientConnection connection, PublishRequest request) {
+    public InboundPublishOutcome handlePublish(ClientConnection connection, PublishRequest request) {
         if (!mqttTopicSupport.isValidTopicName(request.topicName())) {
             brokerEventSink.protocolWarning(connection, "Rejected publish with invalid topic name: " + request.topicName());
-            return PublishResult.rejectedWithDisconnect(MqttDisconnectReasonCode.TOPIC_NAME_INVALID);
+            return InboundPublishOutcome.rejectedWithDisconnect(MqttDisconnectReasonCode.TOPIC_NAME_INVALID);
         }
 
         if (request.qos() < 0 || request.qos() > 2) {
             brokerEventSink.protocolWarning(connection, "Rejected unsupported inbound QoS: " + request.qos());
-            return PublishResult.rejectedWithDisconnect(MqttDisconnectReasonCode.QOS_NOT_SUPPORTED);
+            return InboundPublishOutcome.rejectedWithDisconnect(MqttDisconnectReasonCode.QOS_NOT_SUPPORTED);
         }
 
         if (request.qos() == 2) {
             if (connection.effectiveClientId() == null || request.packetId() <= 0) {
                 brokerEventSink.protocolWarning(connection, "Rejected QoS 2 publish without a packet id");
-                return PublishResult.rejectedWithDisconnect(MqttDisconnectReasonCode.PROTOCOL_ERROR);
+                return InboundPublishOutcome.rejectedWithDisconnect(MqttDisconnectReasonCode.PROTOCOL_ERROR);
             }
             sessionRegistry.startInboundQos2Message(
                     connection.effectiveClientId(),
@@ -206,15 +208,16 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                     request.payload(),
                     request.retain(),
                     request.duplicate());
-            return PublishResult.qos2Received(MqttPubRecReasonCode.SUCCESS);
+            return InboundPublishOutcome.deferred(PublishAcknowledgement.pubRec(MqttPubRecReasonCode.SUCCESS));
         }
 
         PublishRoutingResult routingResult = routePublish(connection, request);
-        return PublishResult.accepted(
-                routingResult.deliveries(),
-                routingResult.queuedMessageCount(),
-                request.qos() == 1,
-                request.qos() == 1 ? MqttPubAckReasonCode.SUCCESS : null);
+        PublishAcknowledgement acknowledgement = request.qos() == 1
+                ? PublishAcknowledgement.pubAck(MqttPubAckReasonCode.SUCCESS)
+                : PublishAcknowledgement.none();
+        return InboundPublishOutcome.completed(
+                DeliveryPlan.of(routingResult.deliveries(), routingResult.queuedMessageCount()),
+                acknowledgement);
     }
 
     private PublishRoutingResult routePublish(ClientConnection connection, PublishRequest request) {
@@ -554,13 +557,13 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             sessionRegistry.discardWillMessage(connection.effectiveClientId(), connection.connectionId());
         }
 
-        PublishResult publishResult = handlePublish(connection, new PublishRequest(
+        InboundPublishOutcome publishResult = handlePublish(connection, new PublishRequest(
                 willMessage.topicName(),
                 0,
                 willMessage.qos().value(),
                 willMessage.retain(),
                 false,
                 willMessage.payloadCopy()));
-        return publishResult.deliveries();
+        return publishResult.deliveryPlan().deliveries();
     }
 }

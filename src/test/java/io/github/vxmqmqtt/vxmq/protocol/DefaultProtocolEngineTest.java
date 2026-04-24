@@ -10,9 +10,10 @@ import io.github.vxmqmqtt.vxmq.auth.PermitAllAuthProvider;
 import io.github.vxmqmqtt.vxmq.observability.BrokerEventSink;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectDecision;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.InboundPublishOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishDelivery;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishRequest;
-import io.github.vxmqmqtt.vxmq.protocol.model.PublishResult;
+import io.github.vxmqmqtt.vxmq.protocol.model.PublishAcknowledgementType;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscribeResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionItem;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionRequest;
@@ -308,7 +309,7 @@ class DefaultProtocolEngineTest {
         protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
                 new SubscriptionItem("sensors/+/temperature", 0))));
 
-        PublishResult result = protocolEngine.handlePublish(publisher, new PublishRequest(
+        InboundPublishOutcome result = protocolEngine.handlePublish(publisher, new PublishRequest(
                 "sensors/room-1/temperature",
                 0,
                 0,
@@ -316,11 +317,11 @@ class DefaultProtocolEngineTest {
                 false,
                 "payload".getBytes()));
 
-        assertTrue(result.accepted());
-        assertEquals(1, result.deliveries().size());
-        assertEquals("subscriber", result.deliveries().getFirst().clientId());
-        assertEquals(MqttQoS.AT_MOST_ONCE, result.deliveries().getFirst().grantedQos());
-        assertFalse(result.publishAcknowledge());
+        assertFalse(result.disconnectAction().isDisconnect());
+        assertEquals(PublishAcknowledgementType.NONE, result.acknowledgement().type());
+        assertEquals(1, result.deliveryPlan().deliveries().size());
+        assertEquals("subscriber", result.deliveryPlan().deliveries().getFirst().clientId());
+        assertEquals(MqttQoS.AT_MOST_ONCE, result.deliveryPlan().deliveries().getFirst().grantedQos());
     }
 
     // Verifies that online QoS 1 subscribers receive an inflight delivery with a packet id and a PUBACK requirement.
@@ -331,7 +332,7 @@ class DefaultProtocolEngineTest {
         protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
                 new SubscriptionItem("sensors/+/temperature", 1))));
 
-        PublishResult result = protocolEngine.handlePublish(publisher, new PublishRequest(
+        InboundPublishOutcome result = protocolEngine.handlePublish(publisher, new PublishRequest(
                 "sensors/room-1/temperature",
                 21,
                 1,
@@ -339,15 +340,15 @@ class DefaultProtocolEngineTest {
                 false,
                 "payload".getBytes()));
 
-        assertTrue(result.accepted());
-        assertTrue(result.publishAcknowledge());
-        assertEquals(MqttPubAckReasonCode.SUCCESS, result.pubAckReasonCode());
-        assertEquals(1, result.deliveries().size());
-        assertEquals(MqttQoS.AT_LEAST_ONCE, result.deliveries().getFirst().grantedQos());
-        assertNotNull(result.deliveries().getFirst().packetId());
+        assertFalse(result.disconnectAction().isDisconnect());
+        assertEquals(PublishAcknowledgementType.PUBACK, result.acknowledgement().type());
+        assertEquals(MqttPubAckReasonCode.SUCCESS, result.acknowledgement().mqtt5ReasonCode());
+        assertEquals(1, result.deliveryPlan().deliveries().size());
+        assertEquals(MqttQoS.AT_LEAST_ONCE, result.deliveryPlan().deliveries().getFirst().grantedQos());
+        assertNotNull(result.deliveryPlan().deliveries().getFirst().packetId());
         assertEquals(1, sessionRegistry.find("subscriber-qos1-online").orElseThrow().inflightMessageCount());
 
-        protocolEngine.handlePubAck(subscriber, result.deliveries().getFirst().packetId());
+        protocolEngine.handlePubAck(subscriber, result.deliveryPlan().deliveries().getFirst().packetId());
 
         assertEquals(0, sessionRegistry.find("subscriber-qos1-online").orElseThrow().inflightMessageCount());
     }
@@ -357,7 +358,7 @@ class DefaultProtocolEngineTest {
     void shouldReplayRetainedMessageAfterSubscribe() {
         ClientConnection publisher = connectClient("publisher-retained", 5, true, false, 0L);
 
-        PublishResult publishResult = protocolEngine.handlePublish(publisher, new PublishRequest(
+        InboundPublishOutcome publishResult = protocolEngine.handlePublish(publisher, new PublishRequest(
                 "sensors/room-1/temperature",
                 0,
                 0,
@@ -365,7 +366,7 @@ class DefaultProtocolEngineTest {
                 false,
                 "retained-payload".getBytes()));
 
-        assertTrue(publishResult.accepted());
+        assertFalse(publishResult.disconnectAction().isDisconnect());
         assertTrue(retainedMessageRegistry.findExact("sensors/room-1/temperature").isPresent());
 
         ClientConnection subscriber = connectClient("subscriber-retained", 5, true, false, 0L);
@@ -415,7 +416,7 @@ class DefaultProtocolEngineTest {
                 false,
                 "retained-payload".getBytes()));
 
-        PublishResult clearResult = protocolEngine.handlePublish(publisher, new PublishRequest(
+        InboundPublishOutcome clearResult = protocolEngine.handlePublish(publisher, new PublishRequest(
                 "sensors/room-1/temperature",
                 35,
                 0,
@@ -423,7 +424,7 @@ class DefaultProtocolEngineTest {
                 false,
                 new byte[0]));
 
-        assertTrue(clearResult.accepted());
+        assertFalse(clearResult.disconnectAction().isDisconnect());
         assertTrue(retainedMessageRegistry.findExact("sensors/room-1/temperature").isEmpty());
     }
 
@@ -436,7 +437,7 @@ class DefaultProtocolEngineTest {
                 new SubscriptionItem("sensors/+/temperature", 1))));
         closeClientConnection(subscriber);
 
-        PublishResult result = protocolEngine.handlePublish(publisher, new PublishRequest(
+        InboundPublishOutcome result = protocolEngine.handlePublish(publisher, new PublishRequest(
                 "sensors/room-1/temperature",
                 22,
                 1,
@@ -444,9 +445,9 @@ class DefaultProtocolEngineTest {
                 false,
                 "payload".getBytes()));
 
-        assertTrue(result.accepted());
-        assertEquals(0, result.deliveries().size());
-        assertEquals(1, result.queuedMessageCount());
+        assertFalse(result.disconnectAction().isDisconnect());
+        assertEquals(0, result.deliveryPlan().deliveries().size());
+        assertEquals(1, result.deliveryPlan().queuedMessageCount());
         assertEquals(1, sessionRegistry.find("subscriber-qos1-offline").orElseThrow().queuedMessageCount());
     }
 
@@ -486,7 +487,7 @@ class DefaultProtocolEngineTest {
         protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
                 new SubscriptionItem("sensors/+/temperature", 2))));
 
-        PublishResult publishResult = protocolEngine.handlePublish(publisher, new PublishRequest(
+        InboundPublishOutcome publishResult = protocolEngine.handlePublish(publisher, new PublishRequest(
                 "sensors/room-1/temperature",
                 45,
                 2,
@@ -494,9 +495,9 @@ class DefaultProtocolEngineTest {
                 false,
                 "payload-qos2".getBytes()));
 
-        assertTrue(publishResult.accepted());
-        assertTrue(publishResult.publishReceived());
-        assertTrue(publishResult.deliveries().isEmpty());
+        assertFalse(publishResult.disconnectAction().isDisconnect());
+        assertEquals(PublishAcknowledgementType.PUBREC, publishResult.acknowledgement().type());
+        assertTrue(publishResult.deliveryPlan().isEmpty());
         assertEquals(1, sessionRegistry.find("publisher-qos2-inbound").orElseThrow().inboundQos2MessageCount());
 
         var pubRelResult = protocolEngine.handlePubRel(publisher, 45);
@@ -596,7 +597,7 @@ class DefaultProtocolEngineTest {
                 new SubscriptionItem("sensors/+/temperature", 1))));
         closeClientConnection(subscriber);
 
-        PublishResult result = protocolEngine.handlePublish(publisher, new PublishRequest(
+        InboundPublishOutcome result = protocolEngine.handlePublish(publisher, new PublishRequest(
                 "sensors/room-1/temperature",
                 24,
                 1,
@@ -604,8 +605,8 @@ class DefaultProtocolEngineTest {
                 false,
                 "payload".getBytes()));
 
-        assertTrue(result.accepted());
-        assertEquals(0, result.queuedMessageCount());
+        assertFalse(result.disconnectAction().isDisconnect());
+        assertEquals(0, result.deliveryPlan().queuedMessageCount());
     }
 
     // Verifies that topic names containing subscription wildcards are rejected for publish.
@@ -613,7 +614,7 @@ class DefaultProtocolEngineTest {
     void shouldRejectPublishWithInvalidTopicName() {
         ClientConnection publisher = connectClient("publisher-invalid-topic", 5, true, false, 0L);
 
-        PublishResult result = protocolEngine.handlePublish(publisher, new PublishRequest(
+        InboundPublishOutcome result = protocolEngine.handlePublish(publisher, new PublishRequest(
                 "sensors/+/temperature",
                 0,
                 0,
@@ -621,10 +622,9 @@ class DefaultProtocolEngineTest {
                 false,
                 "payload".getBytes()));
 
-        assertFalse(result.accepted());
-        assertTrue(result.closeConnection());
-        assertTrue(result.deliveries().isEmpty());
-        assertEquals(MqttDisconnectReasonCode.TOPIC_NAME_INVALID, result.disconnectReasonCode());
+        assertTrue(result.disconnectAction().isDisconnect());
+        assertTrue(result.deliveryPlan().isEmpty());
+        assertEquals(MqttDisconnectReasonCode.TOPIC_NAME_INVALID, result.disconnectAction().reasonCode());
     }
 
     // Verifies that inbound QoS levels above the MQTT QoS 2 boundary are rejected.
@@ -632,7 +632,7 @@ class DefaultProtocolEngineTest {
     void shouldRejectPublishWithUnsupportedQos3() {
         ClientConnection publisher = connectClient("publisher-qos3", 5, true, false, 0L);
 
-        PublishResult result = protocolEngine.handlePublish(publisher, new PublishRequest(
+        InboundPublishOutcome result = protocolEngine.handlePublish(publisher, new PublishRequest(
                 "sensors/room-1/temperature",
                 25,
                 3,
@@ -640,10 +640,9 @@ class DefaultProtocolEngineTest {
                 false,
                 "payload".getBytes()));
 
-        assertFalse(result.accepted());
-        assertTrue(result.closeConnection());
-        assertTrue(result.deliveries().isEmpty());
-        assertEquals(MqttDisconnectReasonCode.QOS_NOT_SUPPORTED, result.disconnectReasonCode());
+        assertTrue(result.disconnectAction().isDisconnect());
+        assertTrue(result.deliveryPlan().isEmpty());
+        assertEquals(MqttDisconnectReasonCode.QOS_NOT_SUPPORTED, result.disconnectAction().reasonCode());
     }
 
     // Verifies that an explicit disconnect changes connection state but defers session cleanup until the socket closes.
