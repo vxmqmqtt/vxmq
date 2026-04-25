@@ -30,11 +30,4 @@ public record UnsubscribeItemResult(
         return new UnsubscribeItemResult(topicFilter, reasonCode);
     }
 
-    /**
-     * Returns whether the broker accepted the unsubscribe item.
-     */
-    public boolean accepted() {
-        return reasonCode == MqttUnsubAckReasonCode.SUCCESS
-                || reasonCode == MqttUnsubAckReasonCode.NO_SUBSCRIPTION_EXISTED;
-    }
 }

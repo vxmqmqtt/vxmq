@@ -4,13 +4,10 @@ import io.vertx.mqtt.messages.codes.MqttUnsubAckReasonCode;
 import java.util.List;
 
 /**
- * Result of processing one UNSUBSCRIBE packet.
+ * UNSUBACK-facing projection of unsubscribe processing.
  */
-public record UnsubscribeResult(List<UnsubscribeItemResult> itemResults) {
+public record UnsubscribeAck(List<UnsubscribeItemResult> itemResults) {
 
-    /**
-     * Converts item results to MQTT 5 UNSUBACK reason codes.
-     */
     public List<MqttUnsubAckReasonCode> reasonCodes() {
         return itemResults.stream()
                 .map(UnsubscribeItemResult::reasonCode)

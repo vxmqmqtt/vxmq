@@ -3,25 +3,36 @@ package io.github.vxmqmqtt.vxmq.transport.vertx;
 import io.github.vxmqmqtt.vxmq.config.BrokerRuntimeConfig;
 import io.github.vxmqmqtt.vxmq.observability.BrokerEventSink;
 import io.github.vxmqmqtt.vxmq.protocol.ProtocolEngine;
-import io.github.vxmqmqtt.vxmq.protocol.model.ConnectDecision;
+import io.github.vxmqmqtt.vxmq.protocol.model.AcceptedConnectResponse;
+import io.github.vxmqmqtt.vxmq.protocol.model.ConnectOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.ConnectResponse;
+import io.github.vxmqmqtt.vxmq.protocol.model.InboundPubRelOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.InboundPublishOutcome;
+import io.github.vxmqmqtt.vxmq.protocol.model.Mqtt311ConnectRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.Mqtt5ConnectRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.OutboundPubRecOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishAcknowledgement;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishAcknowledgementType;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishDelivery;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishRequest;
-import io.github.vxmqmqtt.vxmq.protocol.model.PubRecResult;
-import io.github.vxmqmqtt.vxmq.protocol.model.PubRelResult;
-import io.github.vxmqmqtt.vxmq.protocol.model.SessionResumeResult;
-import io.github.vxmqmqtt.vxmq.protocol.model.SubscribeResult;
+import io.github.vxmqmqtt.vxmq.protocol.model.PublishReleaseDisposition;
+import io.github.vxmqmqtt.vxmq.protocol.model.RejectedConnectResponse;
+import io.github.vxmqmqtt.vxmq.protocol.model.ReplayPubRel;
+import io.github.vxmqmqtt.vxmq.protocol.model.ReplayPublish;
+import io.github.vxmqmqtt.vxmq.protocol.model.SessionResumeAction;
+import io.github.vxmqmqtt.vxmq.protocol.model.SessionResumePlan;
+import io.github.vxmqmqtt.vxmq.protocol.model.SubscribeOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionItem;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionRequest;
-import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeResult;
+import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeAck;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.UnsupportedConnectRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.WillMessage;
 import io.github.vxmqmqtt.vxmq.transport.BrokerTransport;
 import io.github.vxmqmqtt.vxmq.transport.ClientConnection;
 import io.github.vxmqmqtt.vxmq.transport.ClientConnectionRegistry;
+import io.netty.handler.codec.mqtt.MqttConnectReturnCode;
 import io.netty.handler.codec.mqtt.MqttProperties;
 import io.smallrye.mutiny.Uni;
 import io.vertx.mqtt.MqttAuth;
@@ -107,27 +118,31 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                 endpoint.protocolName(),
                 endpoint.protocolVersion(),
                 endpoint.isCleanSession());
-        ConnectDecision decision = protocolEngine.handleConnect(connection, buildConnectRequest(endpoint));
-
-        if (!decision.accepted()) {
-            endpoint.reject(decision.returnCode(), decision.responseProperties());
+        ConnectOutcome decision = protocolEngine.handleConnect(connection, buildConnectRequest(endpoint));
+        ConnectResponse response = decision.response();
+        if (response instanceof RejectedConnectResponse(
+                MqttConnectReturnCode returnCode, MqttProperties responseProperties
+        )) {
+            endpoint.reject(returnCode, responseProperties);
             connectionRegistry.close(connection.connectionId());
             return;
         }
 
-        endpoint.setClientIdentifier(decision.effectiveClientId());
-        endpoint.accept(decision.sessionPresent(), decision.responseProperties());
+        AcceptedConnectResponse acceptedResponse = (AcceptedConnectResponse) response;
+        endpoint.setClientIdentifier(acceptedResponse.effectiveClientId());
+        endpoint.accept(acceptedResponse.sessionPresent(), acceptedResponse.responseProperties());
         endpointsByConnectionId.put(connection.connectionId(), endpoint);
         installHandlers(connection, endpoint);
         // The transport closes the old socket after the new client id binding is accepted.
-        if (decision.supersededConnectionId() != null) {
-            closeSupersededConnection(decision.supersededConnectionId());
+        if (decision.takeoverPlan().requiresTakeover()) {
+            closeSupersededConnection(decision.takeoverPlan().supersededConnectionId());
         }
         sendSessionResume(protocolEngine.handleSessionResume(connection), endpoint);
     }
 
     private void installHandlers(ClientConnection connection, MqttEndpoint endpoint) {
         endpoint.publishAutoAck(false);
+
         endpoint.publishHandler(message -> {
             InboundPublishOutcome publishOutcome = protocolEngine.handlePublish(connection, new PublishRequest(
                     message.topicName(),
@@ -153,7 +168,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
         });
 
         endpoint.subscribeHandler(subscribe -> {
-            SubscribeResult subscribeResult = protocolEngine.handleSubscribe(connection, new SubscriptionRequest(
+            SubscribeOutcome subscribeResult = protocolEngine.handleSubscribe(connection, new SubscriptionRequest(
                     subscribe.topicSubscriptions()
                             .stream()
                             .map(subscription -> new SubscriptionItem(
@@ -164,17 +179,17 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
             if (connection.protocolVersion() == 5) {
                 endpoint.subscribeAcknowledge(
                         subscribe.messageId(),
-                        subscribeResult.reasonCodes(),
+                        subscribeResult.ack().reasonCodes(),
                         MqttProperties.NO_PROPERTIES);
             } else {
-                endpoint.subscribeAcknowledge(subscribe.messageId(), subscribeResult.grantedQosLevels());
+                endpoint.subscribeAcknowledge(subscribe.messageId(), subscribeResult.ack().grantedQosLevels());
             }
 
-            subscribeResult.retainedDeliveries().forEach(this::sendPublishToSubscriber);
+            subscribeResult.retainedReplayPlan().deliveries().forEach(this::sendPublishToSubscriber);
         });
 
         endpoint.unsubscribeHandler(unsubscribe -> {
-            UnsubscribeResult unsubscribeResult =
+            UnsubscribeAck unsubscribeResult =
                     protocolEngine.handleUnsubscribe(connection, new UnsubscribeRequest(unsubscribe.topics()));
             if (connection.protocolVersion() == 5) {
                 endpoint.unsubscribeAcknowledge(
@@ -187,19 +202,24 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
         });
 
         endpoint.disconnectHandler(() -> protocolEngine.handleDisconnect(connection));
+
         endpoint.publishAcknowledgeHandler(packetId -> protocolEngine.handlePubAck(connection, packetId));
+
         endpoint.publishReleaseHandler(packetId -> {
-            PubRelResult pubRelResult = protocolEngine.handlePubRel(connection, packetId);
-            pubRelResult.deliveries().forEach(this::sendPublishToSubscriber);
+            InboundPubRelOutcome pubRelResult = protocolEngine.handlePubRel(connection, packetId);
+            pubRelResult.deliveryPlan().deliveries().forEach(this::sendPublishToSubscriber);
             completeInboundPublish(endpoint, packetId, connection.protocolVersion(), pubRelResult);
         });
+
         endpoint.publishReceivedHandler(packetId -> {
-            PubRecResult pubRecResult = protocolEngine.handlePubRec(connection, packetId);
-            if (pubRecResult.publishRelease()) {
+            OutboundPubRecOutcome pubRecResult = protocolEngine.handlePubRec(connection, packetId);
+            if (pubRecResult.disposition() == PublishReleaseDisposition.SEND) {
                 releaseOutboundPublish(endpoint, packetId, connection.protocolVersion(), pubRecResult.reasonCode());
             }
         });
+
         endpoint.publishCompletionHandler(packetId -> protocolEngine.handlePubComp(connection, packetId));
+
         endpoint.closeHandler(() -> {
             endpointsByConnectionId.remove(connection.connectionId());
             connectionRegistry.close(connection.connectionId());
@@ -209,7 +229,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
 
     private ConnectRequest buildConnectRequest(MqttEndpoint endpoint) {
         if (endpoint.protocolVersion() == 4) {
-            return ConnectRequest.mqtt311(
+            return new Mqtt311ConnectRequest(
                     endpoint.clientIdentifier(),
                     endpoint.protocolName(),
                     endpoint.isCleanSession(),
@@ -218,7 +238,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                     willMessage(endpoint.will()));
         }
         if (endpoint.protocolVersion() == 5) {
-            return ConnectRequest.mqtt5(
+            return new Mqtt5ConnectRequest(
                     endpoint.clientIdentifier(),
                     endpoint.protocolName(),
                     endpoint.isCleanSession(),
@@ -228,13 +248,10 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                     willMessage(endpoint.will()));
         }
 
-        return new ConnectRequest(
+        return new UnsupportedConnectRequest(
                 endpoint.clientIdentifier(),
                 endpoint.protocolName(),
                 endpoint.protocolVersion(),
-                null,
-                null,
-                null,
                 username(endpoint.auth()),
                 passwordPresent(endpoint.auth()),
                 willMessage(endpoint.will()));
@@ -262,10 +279,20 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                                                         .formatted(delivery.clientId(), failure.getMessage()))));
     }
 
-    private void sendSessionResume(SessionResumeResult resumeResult, MqttEndpoint endpoint) {
-        resumeResult.deliveries().forEach(this::sendPublishToSubscriber);
-        resumeResult.qos2PubRelPacketIds().forEach(packetId ->
-                releaseOutboundPublish(endpoint, packetId, endpoint.protocolVersion(), MqttPubRelReasonCode.SUCCESS));
+    private void sendSessionResume(SessionResumePlan resumePlan, MqttEndpoint endpoint) {
+        for (SessionResumeAction action : resumePlan.actions()) {
+            if (action instanceof ReplayPublish replayPublish) {
+                sendPublishToSubscriber(replayPublish.delivery());
+                continue;
+            }
+            if (action instanceof ReplayPubRel replayPubRel) {
+                releaseOutboundPublish(
+                        endpoint,
+                        replayPubRel.packetId(),
+                        endpoint.protocolVersion(),
+                        MqttPubRelReasonCode.SUCCESS);
+            }
+        }
     }
 
     private void disconnectForInvalidPublish(
@@ -315,9 +342,9 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
             MqttEndpoint endpoint,
             int packetId,
             int protocolVersion,
-            PubRelResult pubRelResult) {
+            InboundPubRelOutcome pubRelResult) {
         if (protocolVersion == 5) {
-            endpoint.publishComplete(packetId, pubRelResult.reasonCode(), MqttProperties.NO_PROPERTIES);
+            endpoint.publishComplete(packetId, pubRelResult.completionReasonCode(), MqttProperties.NO_PROPERTIES);
             return;
         }
         endpoint.publishComplete(packetId);

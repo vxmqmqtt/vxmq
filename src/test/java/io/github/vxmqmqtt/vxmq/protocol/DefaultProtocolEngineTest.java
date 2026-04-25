@@ -8,16 +8,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.vxmqmqtt.vxmq.auth.PermitAllAuthProvider;
 import io.github.vxmqmqtt.vxmq.observability.BrokerEventSink;
-import io.github.vxmqmqtt.vxmq.protocol.model.ConnectDecision;
+import io.github.vxmqmqtt.vxmq.protocol.model.AcceptedConnectResponse;
+import io.github.vxmqmqtt.vxmq.protocol.model.ConnectOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.InboundPubRelOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.InboundPublishOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishDelivery;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishAcknowledgementType;
-import io.github.vxmqmqtt.vxmq.protocol.model.SubscribeResult;
+import io.github.vxmqmqtt.vxmq.protocol.model.Mqtt311ConnectRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.Mqtt5ConnectRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.OutboundPubRecOutcome;
+import io.github.vxmqmqtt.vxmq.protocol.model.PublishReleaseDisposition;
+import io.github.vxmqmqtt.vxmq.protocol.model.RejectedConnectResponse;
+import io.github.vxmqmqtt.vxmq.protocol.model.ReplayPublish;
+import io.github.vxmqmqtt.vxmq.protocol.model.SessionResumePlan;
+import io.github.vxmqmqtt.vxmq.protocol.model.SubscribeOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionItem;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionRequest;
-import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeResult;
+import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeAck;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.WillMessage;
 import io.github.vxmqmqtt.vxmq.retained.InMemoryRetainedMessageRegistry;
@@ -74,12 +83,12 @@ class DefaultProtocolEngineTest {
     void shouldRejectEmptyClientIdForPersistentMqtt311Session() {
         ClientConnection connection = connectionRegistry.open("127.0.0.1", "", "MQTT", 4, false);
 
-        ConnectDecision decision = protocolEngine.handleConnect(connection, mqtt311Connect(
+        ConnectOutcome decision = protocolEngine.handleConnect(connection, mqtt311Connect(
                 "",
                 false));
 
-        assertFalse(decision.accepted());
-        assertEquals(MqttConnectReturnCode.CONNECTION_REFUSED_IDENTIFIER_REJECTED, decision.returnCode());
+        RejectedConnectResponse response = (RejectedConnectResponse) decision.response();
+        assertEquals(MqttConnectReturnCode.CONNECTION_REFUSED_IDENTIFIER_REJECTED, response.returnCode());
     }
 
     // Verifies that MQTT 3.1.1 clean sessions can receive an auto-generated client id.
@@ -87,15 +96,15 @@ class DefaultProtocolEngineTest {
     void shouldAssignClientIdForMqtt311CleanSession() {
         ClientConnection connection = connectionRegistry.open("127.0.0.1", "", "MQTT", 4, true);
 
-        ConnectDecision decision = protocolEngine.handleConnect(connection, mqtt311Connect(
+        ConnectOutcome decision = protocolEngine.handleConnect(connection, mqtt311Connect(
                 "",
                 true));
 
-        assertTrue(decision.accepted());
-        assertNotNull(decision.effectiveClientId());
-        assertTrue(decision.effectiveClientId().startsWith("vxmq-"));
-        assertTrue(decision.responseProperties().isEmpty());
-        assertFalse(decision.sessionPresent());
+        AcceptedConnectResponse response = (AcceptedConnectResponse) decision.response();
+        assertNotNull(response.effectiveClientId());
+        assertTrue(response.effectiveClientId().startsWith("vxmq-"));
+        assertTrue(response.responseProperties().isEmpty());
+        assertFalse(response.sessionPresent());
     }
 
     // Verifies that MQTT 5 returns Assigned Client Identifier when the broker generates the id.
@@ -103,17 +112,17 @@ class DefaultProtocolEngineTest {
     void shouldAssignClientIdAndConnAckPropertyForMqtt5() {
         ClientConnection connection = connectionRegistry.open("127.0.0.1", "", "MQTT", 5, true);
 
-        ConnectDecision decision = protocolEngine.handleConnect(connection, mqtt5Connect(
+        ConnectOutcome decision = protocolEngine.handleConnect(connection, mqtt5Connect(
                 "",
                 true,
                 0L));
 
-        assertTrue(decision.accepted());
-        assertNotNull(decision.effectiveClientId());
-        MqttProperties.MqttProperty<?> assignedClientIdProperty = decision.responseProperties()
+        AcceptedConnectResponse response = (AcceptedConnectResponse) decision.response();
+        assertNotNull(response.effectiveClientId());
+        MqttProperties.MqttProperty<?> assignedClientIdProperty = response.responseProperties()
                 .getProperty(MqttProperties.MqttPropertyType.ASSIGNED_CLIENT_IDENTIFIER.value());
         assertNotNull(assignedClientIdProperty);
-        assertEquals(decision.effectiveClientId(), assignedClientIdProperty.value());
+        assertEquals(response.effectiveClientId(), assignedClientIdProperty.value());
     }
 
     // Verifies that a second connection with the same client id marks the previous one as superseded.
@@ -122,42 +131,38 @@ class DefaultProtocolEngineTest {
         ClientConnection firstConnection = connectionRegistry.open("127.0.0.1", "client-a", "MQTT", 5, true);
         ClientConnection secondConnection = connectionRegistry.open("127.0.0.1", "client-a", "MQTT", 5, true);
 
-        ConnectDecision firstDecision = protocolEngine.handleConnect(firstConnection, mqtt5Connect(
+        ConnectOutcome firstDecision = protocolEngine.handleConnect(firstConnection, mqtt5Connect(
                 "client-a",
                 true,
                 0L));
-        ConnectDecision secondDecision = protocolEngine.handleConnect(secondConnection, mqtt5Connect(
+        ConnectOutcome secondDecision = protocolEngine.handleConnect(secondConnection, mqtt5Connect(
                 "client-a",
                 true,
                 0L));
 
-        assertTrue(firstDecision.accepted());
-        assertTrue(secondDecision.accepted());
-        assertNull(firstDecision.supersededConnectionId());
-        assertEquals(firstConnection.connectionId(), secondDecision.supersededConnectionId());
+        assertFalse(firstDecision.takeoverPlan().requiresTakeover());
+        assertEquals(firstConnection.connectionId(), secondDecision.takeoverPlan().supersededConnectionId());
     }
 
     // Verifies that MQTT 3.1.1 cleanSession=false restores an existing persistent session.
     @Test
     void shouldRestorePersistentMqtt311SessionOnReconnect() {
         ClientConnection firstConnection = connectionRegistry.open("127.0.0.1", "mqtt311-persistent", "MQTT", 4, false);
-        ConnectDecision firstDecision = protocolEngine.handleConnect(firstConnection, mqtt311Connect(
+        ConnectOutcome firstDecision = protocolEngine.handleConnect(firstConnection, mqtt311Connect(
                 "mqtt311-persistent",
                 false));
-        assertTrue(firstDecision.accepted());
-        assertFalse(firstDecision.sessionPresent());
+        assertFalse(((AcceptedConnectResponse) firstDecision.response()).sessionPresent());
 
         protocolEngine.handleSubscribe(firstConnection, new SubscriptionRequest(List.of(
                 new SubscriptionItem("sensors/+/temperature", 0))));
         closeClientConnection(firstConnection);
 
         ClientConnection secondConnection = connectionRegistry.open("127.0.0.1", "mqtt311-persistent", "MQTT", 4, false);
-        ConnectDecision secondDecision = protocolEngine.handleConnect(secondConnection, mqtt311Connect(
+        ConnectOutcome secondDecision = protocolEngine.handleConnect(secondConnection, mqtt311Connect(
                 "mqtt311-persistent",
                 false));
 
-        assertTrue(secondDecision.accepted());
-        assertTrue(secondDecision.sessionPresent());
+        assertTrue(((AcceptedConnectResponse) secondDecision.response()).sessionPresent());
         assertTrue(sessionRegistry.find("mqtt311-persistent").orElseThrow().subscriptions().contains("sensors/+/temperature"));
     }
 
@@ -170,12 +175,11 @@ class DefaultProtocolEngineTest {
         closeClientConnection(firstConnection);
 
         ClientConnection secondConnection = connectionRegistry.open("127.0.0.1", "mqtt311-clean", "MQTT", 4, true);
-        ConnectDecision secondDecision = protocolEngine.handleConnect(secondConnection, mqtt311Connect(
+        ConnectOutcome secondDecision = protocolEngine.handleConnect(secondConnection, mqtt311Connect(
                 "mqtt311-clean",
                 true));
 
-        assertTrue(secondDecision.accepted());
-        assertFalse(secondDecision.sessionPresent());
+        assertFalse(((AcceptedConnectResponse) secondDecision.response()).sessionPresent());
         assertTrue(sessionRegistry.find("mqtt311-clean").orElseThrow().subscriptions().isEmpty());
     }
 
@@ -188,13 +192,12 @@ class DefaultProtocolEngineTest {
         closeClientConnection(firstConnection);
 
         ClientConnection secondConnection = connectionRegistry.open("127.0.0.1", "mqtt5-restored", "MQTT", 5, false);
-        ConnectDecision secondDecision = protocolEngine.handleConnect(secondConnection, mqtt5Connect(
+        ConnectOutcome secondDecision = protocolEngine.handleConnect(secondConnection, mqtt5Connect(
                 "mqtt5-restored",
                 false,
                 60L));
 
-        assertTrue(secondDecision.accepted());
-        assertTrue(secondDecision.sessionPresent());
+        assertTrue(((AcceptedConnectResponse) secondDecision.response()).sessionPresent());
         assertTrue(sessionRegistry.find("mqtt5-restored").orElseThrow().subscriptions().contains("sensors/+/temperature"));
     }
 
@@ -207,13 +210,12 @@ class DefaultProtocolEngineTest {
         protocolEngine.handleConnectionClosed(firstConnection);
 
         ClientConnection secondConnection = connectionRegistry.open("127.0.0.1", "mqtt5-fresh", "MQTT", 5, true);
-        ConnectDecision secondDecision = protocolEngine.handleConnect(secondConnection, mqtt5Connect(
+        ConnectOutcome secondDecision = protocolEngine.handleConnect(secondConnection, mqtt5Connect(
                 "mqtt5-fresh",
                 true,
                 60L));
 
-        assertTrue(secondDecision.accepted());
-        assertFalse(secondDecision.sessionPresent());
+        assertFalse(((AcceptedConnectResponse) secondDecision.response()).sessionPresent());
         assertTrue(sessionRegistry.find("mqtt5-fresh").orElseThrow().subscriptions().isEmpty());
     }
 
@@ -234,12 +236,12 @@ class DefaultProtocolEngineTest {
     void shouldGrantQos2ForSupportedSubscription() {
         ClientConnection connection = connectClient("client-sub", 5, true, false, 0L);
 
-        SubscribeResult result = protocolEngine.handleSubscribe(connection, new SubscriptionRequest(List.of(
+        SubscribeOutcome result = protocolEngine.handleSubscribe(connection, new SubscriptionRequest(List.of(
                 new SubscriptionItem("sensors/+/temperature", 2))));
 
-        assertEquals(1, result.itemResults().size());
-        assertEquals(MqttQoS.EXACTLY_ONCE, result.itemResults().getFirst().grantedQos());
-        assertEquals(MqttSubAckReasonCode.GRANTED_QOS2, result.itemResults().getFirst().reasonCode());
+        assertEquals(1, result.ack().itemResults().size());
+        assertEquals(MqttQoS.EXACTLY_ONCE, result.ack().itemResults().getFirst().grantedQos());
+        assertEquals(MqttSubAckReasonCode.GRANTED_QOS2, result.ack().itemResults().getFirst().reasonCode());
         assertTrue(sessionRegistry.find("client-sub").orElseThrow().subscriptions().contains("sensors/+/temperature"));
         assertEquals(1, subscriptionRegistry.match("sensors/room-1/temperature").size());
     }
@@ -249,12 +251,11 @@ class DefaultProtocolEngineTest {
     void shouldRejectInvalidSubscriptionFilter() {
         ClientConnection connection = connectClient("client-invalid-sub", 5, true, false, 0L);
 
-        SubscribeResult result = protocolEngine.handleSubscribe(connection, new SubscriptionRequest(List.of(
+        SubscribeOutcome result = protocolEngine.handleSubscribe(connection, new SubscriptionRequest(List.of(
                 new SubscriptionItem("sensors/#/temperature", 0))));
 
-        assertEquals(1, result.itemResults().size());
-        assertFalse(result.itemResults().getFirst().accepted());
-        assertEquals(MqttSubAckReasonCode.TOPIC_FILTER_INVALID, result.itemResults().getFirst().reasonCode());
+        assertEquals(1, result.ack().itemResults().size());
+        assertEquals(MqttSubAckReasonCode.TOPIC_FILTER_INVALID, result.ack().itemResults().getFirst().reasonCode());
         assertTrue(sessionRegistry.find("client-invalid-sub").orElseThrow().subscriptions().isEmpty());
     }
 
@@ -265,11 +266,10 @@ class DefaultProtocolEngineTest {
         protocolEngine.handleSubscribe(connection, new SubscriptionRequest(List.of(
                 new SubscriptionItem("sensors/+/temperature", 0))));
 
-        UnsubscribeResult result = protocolEngine.handleUnsubscribe(connection, new UnsubscribeRequest(List.of(
+        UnsubscribeAck result = protocolEngine.handleUnsubscribe(connection, new UnsubscribeRequest(List.of(
                 "sensors/+/temperature")));
 
         assertEquals(1, result.itemResults().size());
-        assertTrue(result.itemResults().getFirst().accepted());
         assertEquals(MqttUnsubAckReasonCode.SUCCESS, result.itemResults().getFirst().reasonCode());
         assertTrue(sessionRegistry.find("client-unsub").orElseThrow().subscriptions().isEmpty());
         assertTrue(subscriptionRegistry.match("sensors/room-1/temperature").isEmpty());
@@ -280,11 +280,10 @@ class DefaultProtocolEngineTest {
     void shouldReportNoSubscriptionExistedOnUnsubscribe() {
         ClientConnection connection = connectClient("client-unsub-missing", 5, true, false, 0L);
 
-        UnsubscribeResult result = protocolEngine.handleUnsubscribe(connection, new UnsubscribeRequest(List.of(
+        UnsubscribeAck result = protocolEngine.handleUnsubscribe(connection, new UnsubscribeRequest(List.of(
                 "sensors/+/temperature")));
 
         assertEquals(1, result.itemResults().size());
-        assertTrue(result.itemResults().getFirst().accepted());
         assertEquals(MqttUnsubAckReasonCode.NO_SUBSCRIPTION_EXISTED, result.itemResults().getFirst().reasonCode());
     }
 
@@ -293,11 +292,10 @@ class DefaultProtocolEngineTest {
     void shouldRejectInvalidUnsubscribeFilter() {
         ClientConnection connection = connectClient("client-unsub-invalid", 5, true, false, 0L);
 
-        UnsubscribeResult result = protocolEngine.handleUnsubscribe(connection, new UnsubscribeRequest(List.of(
+        UnsubscribeAck result = protocolEngine.handleUnsubscribe(connection, new UnsubscribeRequest(List.of(
                 "sensors/#/temperature")));
 
         assertEquals(1, result.itemResults().size());
-        assertFalse(result.itemResults().getFirst().accepted());
         assertEquals(MqttUnsubAckReasonCode.TOPIC_FILTER_INVALID, result.itemResults().getFirst().reasonCode());
     }
 
@@ -370,11 +368,11 @@ class DefaultProtocolEngineTest {
         assertTrue(retainedMessageRegistry.findExact("sensors/room-1/temperature").isPresent());
 
         ClientConnection subscriber = connectClient("subscriber-retained", 5, true, false, 0L);
-        SubscribeResult subscribeResult = protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+        SubscribeOutcome subscribeResult = protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
                 new SubscriptionItem("sensors/+/temperature", 0))));
 
-        assertEquals(1, subscribeResult.retainedDeliveries().size());
-        PublishDelivery retainedDelivery = subscribeResult.retainedDeliveries().getFirst();
+        assertEquals(1, subscribeResult.retainedReplayPlan().deliveries().size());
+        PublishDelivery retainedDelivery = subscribeResult.retainedReplayPlan().deliveries().getFirst();
         assertEquals("subscriber-retained", retainedDelivery.clientId());
         assertEquals("sensors/room-1/temperature", retainedDelivery.topicName());
         assertEquals(MqttQoS.AT_MOST_ONCE, retainedDelivery.grantedQos());
@@ -394,11 +392,11 @@ class DefaultProtocolEngineTest {
                 "retained-qos1".getBytes()));
 
         ClientConnection subscriber = connectClient("subscriber-retained-qos1", 5, false, false, 60L);
-        SubscribeResult subscribeResult = protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+        SubscribeOutcome subscribeResult = protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
                 new SubscriptionItem("sensors/+/temperature", 1))));
 
-        assertEquals(1, subscribeResult.retainedDeliveries().size());
-        PublishDelivery retainedDelivery = subscribeResult.retainedDeliveries().getFirst();
+        assertEquals(1, subscribeResult.retainedReplayPlan().deliveries().size());
+        PublishDelivery retainedDelivery = subscribeResult.retainedReplayPlan().deliveries().getFirst();
         assertEquals(MqttQoS.AT_LEAST_ONCE, retainedDelivery.grantedQos());
         assertNotNull(retainedDelivery.packetId());
         assertEquals(1, sessionRegistry.find("subscriber-retained-qos1").orElseThrow().inflightMessageCount());
@@ -469,8 +467,11 @@ class DefaultProtocolEngineTest {
                 "payload".getBytes()));
 
         ClientConnection secondSubscriberConnection = connectClient("subscriber-qos1-resume", 5, false, false, 60L);
-        List<io.github.vxmqmqtt.vxmq.protocol.model.PublishDelivery> resumedDeliveries =
-                protocolEngine.handleSessionResume(secondSubscriberConnection).deliveries();
+        SessionResumePlan resumePlan = protocolEngine.handleSessionResume(secondSubscriberConnection);
+        List<PublishDelivery> resumedDeliveries = resumePlan.actions().stream()
+                .map(ReplayPublish.class::cast)
+                .map(ReplayPublish::delivery)
+                .toList();
 
         assertEquals(1, resumedDeliveries.size());
         assertTrue(resumedDeliveries.getFirst().fromOfflineQueue());
@@ -500,13 +501,13 @@ class DefaultProtocolEngineTest {
         assertTrue(publishResult.deliveryPlan().isEmpty());
         assertEquals(1, sessionRegistry.find("publisher-qos2-inbound").orElseThrow().inboundQos2MessageCount());
 
-        var pubRelResult = protocolEngine.handlePubRel(publisher, 45);
+        InboundPubRelOutcome pubRelResult = protocolEngine.handlePubRel(publisher, 45);
 
-        assertEquals(1, pubRelResult.deliveries().size());
-        assertEquals(MqttQoS.EXACTLY_ONCE, pubRelResult.deliveries().getFirst().grantedQos());
+        assertEquals(1, pubRelResult.deliveryPlan().deliveries().size());
+        assertEquals(MqttQoS.EXACTLY_ONCE, pubRelResult.deliveryPlan().deliveries().getFirst().grantedQos());
         assertEquals(0, sessionRegistry.find("publisher-qos2-inbound").orElseThrow().inboundQos2MessageCount());
         assertEquals(1, sessionRegistry.find("subscriber-qos2-inbound").orElseThrow().inflightMessageCount());
-        assertTrue(protocolEngine.handlePubRel(publisher, 45).deliveries().isEmpty());
+        assertTrue(protocolEngine.handlePubRel(publisher, 45).deliveryPlan().isEmpty());
     }
 
     // Verifies that outbound QoS 2 advances on PUBREC and clears on PUBCOMP.
@@ -524,9 +525,11 @@ class DefaultProtocolEngineTest {
                 false,
                 false,
                 "payload-qos2".getBytes()));
-        PublishDelivery delivery = protocolEngine.handlePubRel(publisher, 46).deliveries().getFirst();
+        PublishDelivery delivery = protocolEngine.handlePubRel(publisher, 46).deliveryPlan().deliveries().getFirst();
 
-        assertTrue(protocolEngine.handlePubRec(subscriber, delivery.packetId()).publishRelease());
+        assertEquals(
+                PublishReleaseDisposition.SEND,
+                protocolEngine.handlePubRec(subscriber, delivery.packetId()).disposition());
         assertEquals(1, sessionRegistry.find("subscriber-qos2-outbound").orElseThrow().inflightMessageCount());
 
         protocolEngine.handlePubComp(subscriber, delivery.packetId());
@@ -553,11 +556,15 @@ class DefaultProtocolEngineTest {
         protocolEngine.handlePubRel(publisher, 47);
 
         ClientConnection secondSubscriberConnection = connectClient("subscriber-qos2-resume", 5, false, false, 60L);
-        var resumeResult = protocolEngine.handleSessionResume(secondSubscriberConnection);
+        SessionResumePlan resumeResult = protocolEngine.handleSessionResume(secondSubscriberConnection);
+        List<PublishDelivery> resumedDeliveries = resumeResult.actions().stream()
+                .map(ReplayPublish.class::cast)
+                .map(ReplayPublish::delivery)
+                .toList();
 
-        assertEquals(1, resumeResult.deliveries().size());
-        assertEquals(MqttQoS.EXACTLY_ONCE, resumeResult.deliveries().getFirst().grantedQos());
-        assertTrue(resumeResult.deliveries().getFirst().fromOfflineQueue());
+        assertEquals(1, resumedDeliveries.size());
+        assertEquals(MqttQoS.EXACTLY_ONCE, resumedDeliveries.getFirst().grantedQos());
+        assertTrue(resumedDeliveries.getFirst().fromOfflineQueue());
         assertEquals(1, sessionRegistry.find("subscriber-qos2-resume").orElseThrow().inflightMessageCount());
     }
 
@@ -578,11 +585,11 @@ class DefaultProtocolEngineTest {
                 retainedMessageRegistry.findExact("sensors/room-1/temperature").orElseThrow().qos());
 
         ClientConnection subscriber = connectClient("subscriber-retained-qos2", 5, false, false, 60L);
-        SubscribeResult subscribeResult = protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+        SubscribeOutcome subscribeResult = protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
                 new SubscriptionItem("sensors/+/temperature", 2))));
 
-        assertEquals(1, subscribeResult.retainedDeliveries().size());
-        PublishDelivery retainedDelivery = subscribeResult.retainedDeliveries().getFirst();
+        assertEquals(1, subscribeResult.retainedReplayPlan().deliveries().size());
+        PublishDelivery retainedDelivery = subscribeResult.retainedReplayPlan().deliveries().getFirst();
         assertEquals(MqttQoS.EXACTLY_ONCE, retainedDelivery.grantedQos());
         assertNotNull(retainedDelivery.packetId());
         assertEquals(1, sessionRegistry.find("subscriber-retained-qos2").orElseThrow().inflightMessageCount());
@@ -700,11 +707,11 @@ class DefaultProtocolEngineTest {
         ClientConnection firstConnection = connectClient("takeover-client", 5, false, false, 60L);
         ClientConnection secondConnection = connectionRegistry.open("127.0.0.1", "takeover-client", "MQTT", 5, false);
 
-        ConnectDecision secondDecision = protocolEngine.handleConnect(secondConnection, mqtt5Connect(
+        ConnectOutcome secondDecision = protocolEngine.handleConnect(secondConnection, mqtt5Connect(
                 "takeover-client",
                 false,
                 60L));
-        assertTrue(secondDecision.accepted());
+        assertTrue(secondDecision.takeoverPlan().requiresTakeover());
 
         closeClientConnection(firstConnection);
 
@@ -735,10 +742,10 @@ class DefaultProtocolEngineTest {
                 "MQTT",
                 protocolVersion,
                 protocolVersion == 4 ? cleanSession : cleanStart);
-        ConnectDecision decision = protocolEngine.handleConnect(connection, protocolVersion == 4
+        ConnectOutcome decision = protocolEngine.handleConnect(connection, protocolVersion == 4
                 ? mqtt311Connect(clientId, cleanSession, willMessage)
                 : mqtt5Connect(clientId, cleanStart, sessionExpiryIntervalSeconds, willMessage));
-        assertTrue(decision.accepted());
+        assertTrue(decision.response() instanceof AcceptedConnectResponse);
         return connection;
     }
 
@@ -747,13 +754,7 @@ class DefaultProtocolEngineTest {
     }
 
     private ConnectRequest mqtt311Connect(String clientId, boolean cleanSession, WillMessage willMessage) {
-        return ConnectRequest.mqtt311(
-                clientId,
-                "MQTT",
-                cleanSession,
-                null,
-                false,
-                willMessage);
+        return new Mqtt311ConnectRequest(clientId, "MQTT", cleanSession, null, false, willMessage);
     }
 
     private ConnectRequest mqtt5Connect(String clientId, boolean cleanStart, long sessionExpiryIntervalSeconds) {
@@ -765,14 +766,7 @@ class DefaultProtocolEngineTest {
             boolean cleanStart,
             long sessionExpiryIntervalSeconds,
             WillMessage willMessage) {
-        return ConnectRequest.mqtt5(
-                clientId,
-                "MQTT",
-                cleanStart,
-                sessionExpiryIntervalSeconds,
-                null,
-                false,
-                willMessage);
+        return new Mqtt5ConnectRequest(clientId, "MQTT", cleanStart, sessionExpiryIntervalSeconds, null, false, willMessage);
     }
 
     private void closeClientConnection(ClientConnection connection) {

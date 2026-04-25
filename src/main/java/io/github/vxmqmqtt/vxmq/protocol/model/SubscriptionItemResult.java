@@ -25,10 +25,4 @@ public record SubscriptionItemResult(
         return new SubscriptionItemResult(topicFilter, MqttQoS.FAILURE, reasonCode);
     }
 
-    /**
-     * Returns whether the broker accepted this filter.
-     */
-    public boolean accepted() {
-        return grantedQos != MqttQoS.FAILURE;
-    }
 }

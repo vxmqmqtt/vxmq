@@ -2,24 +2,34 @@ package io.github.vxmqmqtt.vxmq.protocol;
 
 import io.github.vxmqmqtt.vxmq.auth.AuthProvider;
 import io.github.vxmqmqtt.vxmq.observability.BrokerEventSink;
-import io.github.vxmqmqtt.vxmq.protocol.model.ConnectDecision;
+import io.github.vxmqmqtt.vxmq.protocol.model.AcceptedConnectResponse;
+import io.github.vxmqmqtt.vxmq.protocol.model.ConnectOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.ConnectionTakeoverPlan;
 import io.github.vxmqmqtt.vxmq.protocol.model.DeliveryPlan;
+import io.github.vxmqmqtt.vxmq.protocol.model.InboundPubRelOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.InboundPublishOutcome;
+import io.github.vxmqmqtt.vxmq.protocol.model.Mqtt311ConnectRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.Mqtt5ConnectRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.OutboundPubRecOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishAcknowledgement;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishDelivery;
-import io.github.vxmqmqtt.vxmq.protocol.model.PubRecResult;
-import io.github.vxmqmqtt.vxmq.protocol.model.PubRelResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishRequest;
-import io.github.vxmqmqtt.vxmq.protocol.model.SessionResumeResult;
-import io.github.vxmqmqtt.vxmq.protocol.model.SubscribeResult;
+import io.github.vxmqmqtt.vxmq.protocol.model.RejectedConnectResponse;
+import io.github.vxmqmqtt.vxmq.protocol.model.ReplayPubRel;
+import io.github.vxmqmqtt.vxmq.protocol.model.ReplayPublish;
+import io.github.vxmqmqtt.vxmq.protocol.model.SessionResumeAction;
+import io.github.vxmqmqtt.vxmq.protocol.model.SessionResumePlan;
+import io.github.vxmqmqtt.vxmq.protocol.model.SubscribeAck;
+import io.github.vxmqmqtt.vxmq.protocol.model.SubscribeOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionItem;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionItemResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeAck;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeItemResult;
-import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeResult;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.WillMessage;
+import io.github.vxmqmqtt.vxmq.protocol.model.RetainedReplayPlan;
 import io.github.vxmqmqtt.vxmq.retained.RetainedMessage;
 import io.github.vxmqmqtt.vxmq.retained.RetainedMessageRegistry;
 import io.github.vxmqmqtt.vxmq.routing.SubscriptionBinding;
@@ -42,6 +52,7 @@ import io.netty.handler.codec.mqtt.MqttQoS;
 import io.vertx.mqtt.messages.codes.MqttDisconnectReasonCode;
 import io.vertx.mqtt.messages.codes.MqttPubAckReasonCode;
 import io.vertx.mqtt.messages.codes.MqttPubRecReasonCode;
+import io.vertx.mqtt.messages.codes.MqttPubRelReasonCode;
 import io.vertx.mqtt.messages.codes.MqttSubAckReasonCode;
 import io.vertx.mqtt.messages.codes.MqttUnsubAckReasonCode;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -81,22 +92,28 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     }
 
     @Override
-    public ConnectDecision handleConnect(ClientConnection connection, ConnectRequest request) {
+    public ConnectOutcome handleConnect(ClientConnection connection, ConnectRequest request) {
         // Reject unsupported protocol names or versions before any state is mutated.
         if (!"MQTT".equals(request.protocolName()) || (!request.isMqtt311() && !request.isMqtt5())) {
             brokerEventSink.protocolWarning(connection, "Unsupported protocol version: " + request.protocolVersion());
-            return ConnectDecision.reject(rejectUnsupportedProtocolVersion(request));
+            return ConnectOutcome.rejected(new RejectedConnectResponse(
+                    rejectUnsupportedProtocolVersion(request),
+                    MqttProperties.NO_PROPERTIES));
         }
 
         if (!authProvider.allowConnect(connection, request)) {
             brokerEventSink.protocolWarning(connection, "Connection rejected by auth provider");
-            return ConnectDecision.reject(rejectNotAuthorized(request));
+            return ConnectOutcome.rejected(new RejectedConnectResponse(
+                    rejectNotAuthorized(request),
+                    MqttProperties.NO_PROPERTIES));
         }
 
         String effectiveClientId = resolveClientId(request);
         if (effectiveClientId == null) {
             brokerEventSink.protocolWarning(connection, "Client identifier rejected");
-            return ConnectDecision.reject(rejectInvalidClientId(request));
+            return ConnectOutcome.rejected(new RejectedConnectResponse(
+                    rejectInvalidClientId(request),
+                    MqttProperties.NO_PROPERTIES));
         }
 
         MqttProperties responseProperties = buildConnectResponseProperties(request, effectiveClientId);
@@ -111,15 +128,18 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         String supersededConnectionId = connectionRegistry.bindClientId(effectiveClientId, connection.connectionId())
                 .orElse(null);
         brokerEventSink.connectionAccepted(connection);
-        return ConnectDecision.accept(
-                sessionOpenResult.sessionPresent(),
-                effectiveClientId,
-                responseProperties,
-                supersededConnectionId);
+        return ConnectOutcome.accepted(
+                new AcceptedConnectResponse(
+                        sessionOpenResult.sessionPresent(),
+                        effectiveClientId,
+                        responseProperties),
+                supersededConnectionId == null
+                        ? ConnectionTakeoverPlan.none()
+                        : ConnectionTakeoverPlan.takeOver(supersededConnectionId));
     }
 
     @Override
-    public SubscribeResult handleSubscribe(ClientConnection connection, SubscriptionRequest request) {
+    public SubscribeOutcome handleSubscribe(ClientConnection connection, SubscriptionRequest request) {
         List<SubscriptionItemResult> results = new ArrayList<>();
         List<PublishDelivery> retainedDeliveries = new ArrayList<>();
         for (SubscriptionItem item : request.items()) {
@@ -153,11 +173,15 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 results.add(SubscriptionItemResult.rejected(topicFilter, MqttSubAckReasonCode.UNSPECIFIED_ERROR));
             }
         }
-        return new SubscribeResult(results, retainedDeliveries);
+        return new SubscribeOutcome(
+                new SubscribeAck(results),
+                retainedDeliveries.isEmpty()
+                        ? RetainedReplayPlan.empty()
+                        : new RetainedReplayPlan(retainedDeliveries));
     }
 
     @Override
-    public UnsubscribeResult handleUnsubscribe(ClientConnection connection, UnsubscribeRequest request) {
+    public UnsubscribeAck handleUnsubscribe(ClientConnection connection, UnsubscribeRequest request) {
         List<UnsubscribeItemResult> results = new ArrayList<>();
         for (String topicFilter : request.topicFilters()) {
             if (!mqttTopicSupport.isValidFilter(topicFilter)) {
@@ -181,7 +205,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 results.add(UnsubscribeItemResult.rejected(topicFilter, MqttUnsubAckReasonCode.UNSPECIFIED_ERROR));
             }
         }
-        return new UnsubscribeResult(results);
+        return new UnsubscribeAck(results);
     }
 
     @Override
@@ -275,35 +299,34 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     }
 
     @Override
-    public SessionResumeResult handleSessionResume(ClientConnection connection) {
+    public SessionResumePlan handleSessionResume(ClientConnection connection) {
         if (connection.effectiveClientId() == null) {
-            return SessionResumeResult.empty();
+            return SessionResumePlan.empty();
         }
 
         ClientSession session = sessionRegistry.find(connection.effectiveClientId()).orElse(null);
         if (session == null || !connection.connectionId().equals(session.connectionId())) {
-            return SessionResumeResult.empty();
+            return SessionResumePlan.empty();
         }
 
         List<InflightMessage> drainedMessages = sessionRegistry.drainQueuedMessages(connection.effectiveClientId());
         List<Integer> drainedPacketIds = drainedMessages.stream()
                 .map(InflightMessage::packetId)
                 .toList();
-        List<PublishDelivery> deliveries = new ArrayList<>(drainedMessages.stream()
-                .map(inflightMessage -> toPublishDelivery(connection.effectiveClientId(), inflightMessage))
+        List<SessionResumeAction> actions = new ArrayList<>(drainedMessages.stream()
+                .map(inflightMessage -> new ReplayPublish(toPublishDelivery(connection.effectiveClientId(), inflightMessage)))
                 .toList());
-        List<Integer> qos2PubRelPacketIds = new ArrayList<>();
         for (InflightMessage inflightMessage : sessionRegistry.outboundQos2InflightMessages(connection.effectiveClientId())) {
             if (drainedPacketIds.contains(inflightMessage.packetId())) {
                 continue;
             }
             if (inflightMessage.qos2State() == OutboundQos2State.PUBREL_SENT) {
-                qos2PubRelPacketIds.add(inflightMessage.packetId());
+                actions.add(new ReplayPubRel(inflightMessage.packetId()));
             } else {
-                deliveries.add(toPublishDelivery(connection.effectiveClientId(), inflightMessage));
+                actions.add(new ReplayPublish(toPublishDelivery(connection.effectiveClientId(), inflightMessage)));
             }
         }
-        return new SessionResumeResult(deliveries, qos2PubRelPacketIds);
+        return actions.isEmpty() ? SessionResumePlan.empty() : new SessionResumePlan(actions);
     }
 
     @Override
@@ -314,9 +337,9 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     }
 
     @Override
-    public PubRelResult handlePubRel(ClientConnection connection, int packetId) {
+    public InboundPubRelOutcome handlePubRel(ClientConnection connection, int packetId) {
         if (connection.effectiveClientId() == null) {
-            return PubRelResult.alreadyComplete();
+            return InboundPubRelOutcome.alreadyComplete();
         }
 
         InboundQos2Message inboundMessage = sessionRegistry.completeInboundQos2Message(
@@ -324,7 +347,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                         packetId)
                 .orElse(null);
         if (inboundMessage == null) {
-            return PubRelResult.alreadyComplete();
+            return InboundPubRelOutcome.alreadyComplete();
         }
 
         PublishRoutingResult routingResult = routePublish(connection, new PublishRequest(
@@ -334,18 +357,19 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 inboundMessage.retain(),
                 inboundMessage.duplicate(),
                 inboundMessage.payloadCopy()));
-        return PubRelResult.complete(routingResult.deliveries(), routingResult.queuedMessageCount());
+        return InboundPubRelOutcome.completed(
+                DeliveryPlan.of(routingResult.deliveries(), routingResult.queuedMessageCount()));
     }
 
     @Override
-    public PubRecResult handlePubRec(ClientConnection connection, int packetId) {
+    public OutboundPubRecOutcome handlePubRec(ClientConnection connection, int packetId) {
         if (connection.effectiveClientId() == null) {
-            return PubRecResult.unknownPacketId();
+            return OutboundPubRecOutcome.skip(MqttPubRelReasonCode.PACKET_IDENTIFIER_NOT_FOUND);
         }
 
         return sessionRegistry.markOutboundQos2PubRec(connection.effectiveClientId(), packetId)
-                .map(ignored -> PubRecResult.release())
-                .orElseGet(PubRecResult::unknownPacketId);
+                .map(ignored -> OutboundPubRecOutcome.send(MqttPubRelReasonCode.SUCCESS))
+                .orElseGet(() -> OutboundPubRecOutcome.skip(MqttPubRelReasonCode.PACKET_IDENTIFIER_NOT_FOUND));
     }
 
     @Override
@@ -380,10 +404,12 @@ public class DefaultProtocolEngine implements ProtocolEngine {
 
     private SessionOpenRequest buildSessionOpenRequest(ConnectRequest request, String connectionId) {
         // MQTT 3.1.1 and MQTT 5 share the same open/restore flow, but differ in persistence semantics.
-        Long sessionExpiryIntervalSeconds = request.isMqtt5() ? request.mqtt5SessionExpiryIntervalSeconds() : null;
+        Long sessionExpiryIntervalSeconds = request instanceof Mqtt5ConnectRequest mqtt5Request
+                ? mqtt5Request.sessionExpiryIntervalSeconds()
+                : null;
         return new SessionOpenRequest(
-                request.startsFreshSession(),
-                request.retainsSessionOnDisconnect(),
+                startsFreshSession(request),
+                retainsSessionOnDisconnect(request),
                 sessionExpiryIntervalSeconds,
                 connectionId,
                 request.willMessage());
@@ -396,7 +422,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         }
 
         // MQTT 3.1.1 requires a persistent session to carry a non-empty client identifier.
-        if (request.isMqtt311() && !request.mqtt311CleanSession()) {
+        if (request instanceof Mqtt311ConnectRequest mqtt311Request && !mqtt311Request.cleanSession()) {
             return null;
         }
 
@@ -447,6 +473,26 @@ public class DefaultProtocolEngine implements ProtocolEngine {
 
     private boolean isSupportedRequestedQos(int requestedQos) {
         return requestedQos >= 0 && requestedQos <= 2;
+    }
+
+    private boolean startsFreshSession(ConnectRequest request) {
+        if (request instanceof Mqtt311ConnectRequest mqtt311Request) {
+            return mqtt311Request.cleanSession();
+        }
+        if (request instanceof Mqtt5ConnectRequest mqtt5Request) {
+            return mqtt5Request.cleanStart();
+        }
+        return true;
+    }
+
+    private boolean retainsSessionOnDisconnect(ConnectRequest request) {
+        if (request instanceof Mqtt311ConnectRequest mqtt311Request) {
+            return !mqtt311Request.cleanSession();
+        }
+        if (request instanceof Mqtt5ConnectRequest mqtt5Request) {
+            return mqtt5Request.sessionExpiryIntervalSeconds() > 0;
+        }
+        return false;
     }
 
     private MqttQoS grantedSubscriptionQos(int requestedQos) {

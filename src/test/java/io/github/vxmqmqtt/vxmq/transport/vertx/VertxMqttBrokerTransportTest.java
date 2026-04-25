@@ -8,20 +8,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import io.github.vxmqmqtt.vxmq.config.BrokerRuntimeConfig;
 import io.github.vxmqmqtt.vxmq.observability.BrokerEventSink;
 import io.github.vxmqmqtt.vxmq.protocol.ProtocolEngine;
-import io.github.vxmqmqtt.vxmq.protocol.model.ConnectDecision;
+import io.github.vxmqmqtt.vxmq.protocol.model.ConnectOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.DeliveryPlan;
-import io.github.vxmqmqtt.vxmq.protocol.model.DisconnectAction;
 import io.github.vxmqmqtt.vxmq.protocol.model.InboundPublishOutcome;
+import io.github.vxmqmqtt.vxmq.protocol.model.InboundPubRelOutcome;
+import io.github.vxmqmqtt.vxmq.protocol.model.OutboundPubRecOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishAcknowledgement;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishDelivery;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishRequest;
-import io.github.vxmqmqtt.vxmq.protocol.model.PubRecResult;
-import io.github.vxmqmqtt.vxmq.protocol.model.PubRelResult;
-import io.github.vxmqmqtt.vxmq.protocol.model.SessionResumeResult;
-import io.github.vxmqmqtt.vxmq.protocol.model.SubscribeResult;
+import io.github.vxmqmqtt.vxmq.protocol.model.PublishReleaseDisposition;
+import io.github.vxmqmqtt.vxmq.protocol.model.SessionResumePlan;
+import io.github.vxmqmqtt.vxmq.protocol.model.SubscribeOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionRequest;
-import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeResult;
+import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeAck;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeRequest;
 import io.github.vxmqmqtt.vxmq.transport.ClientConnection;
 import io.github.vxmqmqtt.vxmq.transport.ClientConnectionRegistry;
@@ -268,17 +268,17 @@ class VertxMqttBrokerTransportTest {
     private static ProtocolEngine protocolEngineReturning(InboundPublishOutcome publishOutcome) {
         return new ProtocolEngine() {
             @Override
-            public ConnectDecision handleConnect(ClientConnection connection, ConnectRequest request) {
+            public ConnectOutcome handleConnect(ClientConnection connection, ConnectRequest request) {
                 throw new UnsupportedOperationException();
             }
 
             @Override
-            public SubscribeResult handleSubscribe(ClientConnection connection, SubscriptionRequest request) {
+            public SubscribeOutcome handleSubscribe(ClientConnection connection, SubscriptionRequest request) {
                 throw new UnsupportedOperationException();
             }
 
             @Override
-            public UnsubscribeResult handleUnsubscribe(ClientConnection connection, UnsubscribeRequest request) {
+            public UnsubscribeAck handleUnsubscribe(ClientConnection connection, UnsubscribeRequest request) {
                 throw new UnsupportedOperationException();
             }
 
@@ -288,8 +288,8 @@ class VertxMqttBrokerTransportTest {
             }
 
             @Override
-            public SessionResumeResult handleSessionResume(ClientConnection connection) {
-                return SessionResumeResult.empty();
+            public SessionResumePlan handleSessionResume(ClientConnection connection) {
+                return SessionResumePlan.empty();
             }
 
             @Override
@@ -297,13 +297,13 @@ class VertxMqttBrokerTransportTest {
             }
 
             @Override
-            public PubRelResult handlePubRel(ClientConnection connection, int packetId) {
-                return PubRelResult.alreadyComplete();
+            public InboundPubRelOutcome handlePubRel(ClientConnection connection, int packetId) {
+                return InboundPubRelOutcome.alreadyComplete();
             }
 
             @Override
-            public PubRecResult handlePubRec(ClientConnection connection, int packetId) {
-                return PubRecResult.release();
+            public OutboundPubRecOutcome handlePubRec(ClientConnection connection, int packetId) {
+                return OutboundPubRecOutcome.send(io.vertx.mqtt.messages.codes.MqttPubRelReasonCode.SUCCESS);
             }
 
             @Override
