@@ -14,7 +14,9 @@ import java.util.concurrent.ConcurrentHashMap;
 @ApplicationScoped
 public class ClientConnectionRegistry {
 
+    // key: connectionId, value: ClientConnection
     private final Map<String, ClientConnection> connections = new ConcurrentHashMap<>();
+    // key: clientId, value: connectionId
     private final Map<String, String> activeConnectionIdsByClientId = new ConcurrentHashMap<>();
 
     public ClientConnection open(

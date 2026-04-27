@@ -23,9 +23,12 @@ public final class ClientSession {
     private volatile boolean persistent;
     private volatile Long sessionExpiryIntervalSeconds;
     private volatile Instant expiresAt;
+    // key: topicFilter, value: MqttQoS
     private final Map<String, MqttQoS> subscriptions = new ConcurrentHashMap<>();
     private final Deque<QueuedMessage> queuedMessages = new ArrayDeque<>();
+    // key: packetId, value: InflightMessage
     private final Map<Integer, InflightMessage> inflightMessages = new LinkedHashMap<>();
+    // key: packetId, value: InboundQos2Message
     private final Map<Integer, InboundQos2Message> inboundQos2Messages = new LinkedHashMap<>();
     private volatile WillMessage willMessage;
     private int nextPacketId = 1;

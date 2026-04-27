@@ -15,6 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @ApplicationScoped
 public class InMemoryRetainedMessageRegistry implements RetainedMessageRegistry {
 
+    // key: topicName, value: RetainedMessage
     private final Map<String, RetainedMessage> retainedMessagesByTopic = new ConcurrentHashMap<>();
     private final MqttTopicSupport mqttTopicSupport;
 

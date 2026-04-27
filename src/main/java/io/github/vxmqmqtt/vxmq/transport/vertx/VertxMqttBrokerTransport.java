@@ -62,6 +62,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
     private final ProtocolEngine protocolEngine;
     private final ClientConnectionRegistry connectionRegistry;
     private final BrokerEventSink brokerEventSink;
+    // key: connectionId, value: MqttEndpoint
     private final Map<String, MqttEndpoint> endpointsByConnectionId = new ConcurrentHashMap<>();
     private volatile MqttServer mqttServer;
 
@@ -281,14 +282,14 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
 
     private void sendSessionResume(SessionResumePlan resumePlan, MqttEndpoint endpoint) {
         for (SessionResumeAction action : resumePlan.actions()) {
-            if (action instanceof ReplayPublish replayPublish) {
-                sendPublishToSubscriber(replayPublish.delivery());
+            if (action instanceof ReplayPublish(PublishDelivery delivery)) {
+                sendPublishToSubscriber(delivery);
                 continue;
             }
-            if (action instanceof ReplayPubRel replayPubRel) {
+            if (action instanceof ReplayPubRel(int packetId)) {
                 releaseOutboundPublish(
                         endpoint,
-                        replayPubRel.packetId(),
+                        packetId,
                         endpoint.protocolVersion(),
                         MqttPubRelReasonCode.SUCCESS);
             }
