@@ -35,6 +35,7 @@ class ConnectRequestTest {
         assertTrue(request.isMqtt5());
         assertFalse(mqtt5Request.cleanStart());
         assertEquals(60L, mqtt5Request.sessionExpiryIntervalSeconds());
+        assertTrue(request.properties().userProperties().isEmpty());
     }
 
     @Test
@@ -61,5 +62,23 @@ class ConnectRequestTest {
         assertEquals(willMessage, request.willMessage());
         assertFalse(request.cleanStart());
         assertEquals(60L, request.sessionExpiryIntervalSeconds());
+    }
+
+    @Test
+    void shouldModelMqtt5ConnectUserProperties() {
+        MqttUserProperties userProperties = new MqttUserProperties(
+                java.util.List.of(new MqttUserProperty("auth-hint", "plugin-a")));
+
+        ConnectRequest request = new Mqtt5ConnectRequest(
+                "client-5",
+                "MQTT",
+                false,
+                60L,
+                null,
+                false,
+                null,
+                userProperties);
+
+        assertEquals(userProperties, request.properties().userProperties());
     }
 }

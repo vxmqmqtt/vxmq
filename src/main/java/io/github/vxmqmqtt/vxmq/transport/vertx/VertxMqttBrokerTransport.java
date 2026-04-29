@@ -11,6 +11,7 @@ import io.github.vxmqmqtt.vxmq.protocol.model.InboundPubRelOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.InboundPublishOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.Mqtt311ConnectRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.Mqtt5ConnectRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.MqttUserProperties;
 import io.github.vxmqmqtt.vxmq.protocol.model.OutboundPubRecOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishAcknowledgement;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishAcknowledgementType;
@@ -18,7 +19,7 @@ import io.github.vxmqmqtt.vxmq.protocol.model.PublishProperties;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishDelivery;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishReleaseDisposition;
-import io.github.vxmqmqtt.vxmq.protocol.model.PublishUserProperty;
+import io.github.vxmqmqtt.vxmq.protocol.model.MqttUserProperty;
 import io.github.vxmqmqtt.vxmq.protocol.model.RejectedConnectResponse;
 import io.github.vxmqmqtt.vxmq.protocol.model.ReplayPubRel;
 import io.github.vxmqmqtt.vxmq.protocol.model.ReplayPublish;
@@ -157,7 +158,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                     message.isRetain(),
                     message.isDup(),
                     message.payload() == null ? null : message.payload().getBytes(),
-                    publishProperties(connection.protocolVersion(), message.properties())));
+                    new PublishProperties(userProperties(connection.protocolVersion(), message.properties()))));
 
             if (publishOutcome.disconnectAction().isDisconnect()) {
                 disconnectForInvalidPublish(connection, endpoint, publishOutcome.disconnectAction().reasonCode());
@@ -185,7 +186,8 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                                     subscriptionOption(subscription).isRetainAsPublished(),
                                     subscriptionOption(subscription).retainHandling(),
                                     subscriptionIdentifier(subscribe.properties())))
-                            .collect(Collectors.toList())));
+                            .collect(Collectors.toList()),
+                    userProperties(connection.protocolVersion(), subscribe.properties())));
 
             if (connection.protocolVersion() == 5) {
                 endpoint.subscribeAcknowledge(
@@ -201,7 +203,9 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
 
         endpoint.unsubscribeHandler(unsubscribe -> {
             UnsubscribeAck unsubscribeResult =
-                    protocolEngine.handleUnsubscribe(connection, new UnsubscribeRequest(unsubscribe.topics()));
+                    protocolEngine.handleUnsubscribe(connection, new UnsubscribeRequest(
+                            unsubscribe.topics(),
+                            userProperties(connection.protocolVersion(), unsubscribe.properties())));
             if (connection.protocolVersion() == 5) {
                 endpoint.unsubscribeAcknowledge(
                         unsubscribe.messageId(),
@@ -256,7 +260,8 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                     sessionExpiryIntervalSeconds(endpoint.connectProperties()),
                     username(endpoint.auth()),
                     passwordPresent(endpoint.auth()),
-                    willMessage(endpoint.protocolVersion(), endpoint.will()));
+                    willMessage(endpoint.protocolVersion(), endpoint.will()),
+                    userProperties(endpoint.protocolVersion(), endpoint.connectProperties()));
         }
 
         return new UnsupportedConnectRequest(
@@ -409,7 +414,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
             return MqttProperties.NO_PROPERTIES;
         }
         MqttProperties properties = new MqttProperties();
-        for (PublishUserProperty userProperty : delivery.properties().userProperties()) {
+        for (MqttUserProperty userProperty : delivery.properties().userProperties().values()) {
             properties.add(new MqttProperties.UserProperty(userProperty.key(), userProperty.value()));
         }
         for (Integer subscriptionIdentifier : delivery.subscriptionIdentifiers()) {
@@ -420,17 +425,17 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
         return properties;
     }
 
-    private PublishProperties publishProperties(int protocolVersion, MqttProperties mqttProperties) {
+    private MqttUserProperties userProperties(int protocolVersion, MqttProperties mqttProperties) {
         if (protocolVersion != 5 || mqttProperties == null) {
-            return PublishProperties.empty();
+            return MqttUserProperties.empty();
         }
-        List<PublishUserProperty> userProperties = new ArrayList<>();
+        List<MqttUserProperty> userProperties = new ArrayList<>();
         for (MqttProperties.MqttProperty<?> property : mqttProperties.getProperties(
                 MqttProperties.MqttPropertyType.USER_PROPERTY.value())) {
             MqttProperties.StringPair pair = (MqttProperties.StringPair) property.value();
-            userProperties.add(new PublishUserProperty(pair.key, pair.value));
+            userProperties.add(new MqttUserProperty(pair.key, pair.value));
         }
-        return userProperties.isEmpty() ? PublishProperties.empty() : new PublishProperties(userProperties);
+        return userProperties.isEmpty() ? MqttUserProperties.empty() : new MqttUserProperties(userProperties);
     }
 
     /**
@@ -495,7 +500,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                         ? io.netty.handler.codec.mqtt.MqttQoS.AT_MOST_ONCE
                         : io.netty.handler.codec.mqtt.MqttQoS.AT_LEAST_ONCE,
                 will.isWillRetain(),
-                publishProperties(protocolVersion, will.getWillProperties()));
+                new PublishProperties(userProperties(protocolVersion, will.getWillProperties())));
     }
 
     /**

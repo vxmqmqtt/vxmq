@@ -16,7 +16,8 @@ import io.github.vxmqmqtt.vxmq.protocol.model.InboundPublishOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishDelivery;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishProperties;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishRequest;
-import io.github.vxmqmqtt.vxmq.protocol.model.PublishUserProperty;
+import io.github.vxmqmqtt.vxmq.protocol.model.MqttUserProperty;
+import io.github.vxmqmqtt.vxmq.protocol.model.MqttUserProperties;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishAcknowledgementType;
 import io.github.vxmqmqtt.vxmq.protocol.model.Mqtt311ConnectRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.Mqtt5ConnectRequest;
@@ -343,13 +344,13 @@ class DefaultProtocolEngineTest {
                 false,
                 "payload".getBytes(),
                 userProperties(
-                        new PublishUserProperty("trace", "a"),
-                        new PublishUserProperty("trace", "b"))));
+                        new MqttUserProperty("trace", "a"),
+                        new MqttUserProperty("trace", "b"))));
 
         assertEquals(1, result.deliveryPlan().deliveries().size());
         assertEquals(
-                List.of(new PublishUserProperty("trace", "a"), new PublishUserProperty("trace", "b")),
-                result.deliveryPlan().deliveries().getFirst().properties().userProperties());
+                List.of(new MqttUserProperty("trace", "a"), new MqttUserProperty("trace", "b")),
+                result.deliveryPlan().deliveries().getFirst().properties().userProperties().values());
     }
 
     // Verifies that MQTT 5 No Local subscriptions do not receive publishes from the same client.
@@ -562,7 +563,7 @@ class DefaultProtocolEngineTest {
                 true,
                 false,
                 "retained-payload".getBytes(),
-                userProperties(new PublishUserProperty("source", "retained"))));
+                userProperties(new MqttUserProperty("source", "retained"))));
         ClientConnection subscriber = connectClient("subscriber-retained-user-properties", 5, true, false, 0L);
 
         SubscribeOutcome subscribeResult = protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
@@ -570,8 +571,8 @@ class DefaultProtocolEngineTest {
 
         PublishDelivery retainedDelivery = subscribeResult.retainedReplayPlan().deliveries().getFirst();
         assertEquals(
-                List.of(new PublishUserProperty("source", "retained")),
-                retainedDelivery.properties().userProperties());
+                List.of(new MqttUserProperty("source", "retained")),
+                retainedDelivery.properties().userProperties().values());
     }
 
     // Verifies that retained publishes use the minimum of retained QoS and granted subscription QoS.
@@ -726,7 +727,7 @@ class DefaultProtocolEngineTest {
                 false,
                 false,
                 "payload".getBytes(),
-                userProperties(new PublishUserProperty("offline", "yes"))));
+                userProperties(new MqttUserProperty("offline", "yes"))));
 
         ClientConnection secondSubscriberConnection =
                 connectClient("subscriber-user-properties-resume", 5, false, false, 60L);
@@ -738,8 +739,8 @@ class DefaultProtocolEngineTest {
 
         assertEquals(1, resumedDeliveries.size());
         assertEquals(
-                List.of(new PublishUserProperty("offline", "yes")),
-                resumedDeliveries.getFirst().properties().userProperties());
+                List.of(new MqttUserProperty("offline", "yes")),
+                resumedDeliveries.getFirst().properties().userProperties().values());
     }
 
     // Verifies that inbound QoS 2 publish is routed only after PUBREL and duplicate PUBREL does not re-deliver.
@@ -787,14 +788,14 @@ class DefaultProtocolEngineTest {
                 false,
                 false,
                 "payload-qos2".getBytes(),
-                userProperties(new PublishUserProperty("qos", "2"))));
+                userProperties(new MqttUserProperty("qos", "2"))));
 
         InboundPubRelOutcome pubRelResult = protocolEngine.handlePubRel(publisher, 49);
 
         assertEquals(1, pubRelResult.deliveryPlan().deliveries().size());
         assertEquals(
-                List.of(new PublishUserProperty("qos", "2")),
-                pubRelResult.deliveryPlan().deliveries().getFirst().properties().userProperties());
+                List.of(new MqttUserProperty("qos", "2")),
+                pubRelResult.deliveryPlan().deliveries().getFirst().properties().userProperties().values());
     }
 
     // Verifies that outbound QoS 2 advances on PUBREC and clears on PUBCOMP.
@@ -1040,13 +1041,13 @@ class DefaultProtocolEngineTest {
                         "offline".getBytes(),
                         MqttQoS.AT_MOST_ONCE,
                         false,
-                        userProperties(new PublishUserProperty("trace", "will"))));
+                        userProperties(new MqttUserProperty("trace", "will"))));
 
         List<PublishDelivery> deliveries = protocolEngine.handleConnectionClosed(publisher);
 
         assertEquals(
-                List.of(new PublishUserProperty("trace", "will")),
-                deliveryFor(deliveries, "subscriber-will-user-properties").properties().userProperties());
+                List.of(new MqttUserProperty("trace", "will")),
+                deliveryFor(deliveries, "subscriber-will-user-properties").properties().userProperties().values());
     }
 
     // Verifies that retained will user properties are saved and replayed with the retained message.
@@ -1063,7 +1064,7 @@ class DefaultProtocolEngineTest {
                         "offline".getBytes(),
                         MqttQoS.AT_MOST_ONCE,
                         true,
-                        userProperties(new PublishUserProperty("trace", "retained-will"))));
+                        userProperties(new MqttUserProperty("trace", "retained-will"))));
         protocolEngine.handleConnectionClosed(publisher);
         ClientConnection subscriber = connectClient("subscriber-retained-will-user-properties", 5, true, false, 0L);
 
@@ -1071,12 +1072,13 @@ class DefaultProtocolEngineTest {
                 new SubscriptionItem("status/+", 0))));
 
         assertEquals(
-                List.of(new PublishUserProperty("trace", "retained-will")),
+                List.of(new MqttUserProperty("trace", "retained-will")),
                 deliveryFor(
                                 outcome.retainedReplayPlan().deliveries(),
                                 "subscriber-retained-will-user-properties")
                         .properties()
-                        .userProperties());
+                        .userProperties()
+                        .values());
     }
 
     // Verifies that closing a superseded connection does not accidentally unbind the newer takeover session.
@@ -1147,8 +1149,8 @@ class DefaultProtocolEngineTest {
         return new Mqtt5ConnectRequest(clientId, "MQTT", cleanStart, sessionExpiryIntervalSeconds, null, false, willMessage);
     }
 
-    private PublishProperties userProperties(PublishUserProperty... userProperties) {
-        return new PublishProperties(List.of(userProperties));
+    private PublishProperties userProperties(MqttUserProperty... userProperties) {
+        return new PublishProperties(new MqttUserProperties(List.of(userProperties)));
     }
 
     private PublishDelivery deliveryFor(List<PublishDelivery> deliveries, String clientId) {

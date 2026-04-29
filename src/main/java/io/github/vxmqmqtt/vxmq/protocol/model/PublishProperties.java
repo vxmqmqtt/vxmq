@@ -1,16 +1,14 @@
 package io.github.vxmqmqtt.vxmq.protocol.model;
 
-import java.util.List;
-
 /**
  * MQTT 5 PUBLISH properties currently supported by the broker protocol model.
  */
-public record PublishProperties(List<PublishUserProperty> userProperties) {
+public record PublishProperties(MqttUserProperties userProperties) {
 
-    private static final PublishProperties EMPTY = new PublishProperties(List.of());
+    private static final PublishProperties EMPTY = new PublishProperties(MqttUserProperties.empty());
 
     public PublishProperties {
-        userProperties = List.copyOf(userProperties);
+        userProperties = userProperties == null ? MqttUserProperties.empty() : userProperties;
     }
 
     public static PublishProperties empty() {

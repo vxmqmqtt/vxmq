@@ -99,6 +99,7 @@ flowchart TD
 ### `auth`
 
 - 提供连接鉴权扩展点。
+- 可从 `ConnectRequest` 读取 MQTT 5 CONNECT `User Property`，供后续认证插件使用。
 - 当前默认实现为 `permit-all`。
 
 ### `observability`

@@ -48,7 +48,7 @@ class WillMessageTest {
     @Test
     void shouldPreserveWillPublishProperties() {
         PublishProperties properties = new PublishProperties(
-                java.util.List.of(new PublishUserProperty("trace", "will")));
+                new MqttUserProperties(java.util.List.of(new MqttUserProperty("trace", "will"))));
         WillMessage willMessage = new WillMessage(
                 "status/last-will",
                 "gone".getBytes(),

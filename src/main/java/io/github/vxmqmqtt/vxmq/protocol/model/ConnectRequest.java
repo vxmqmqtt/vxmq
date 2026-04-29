@@ -18,6 +18,10 @@ public sealed interface ConnectRequest
 
     WillMessage willMessage();
 
+    default ConnectProperties properties() {
+        return ConnectProperties.empty();
+    }
+
     default boolean isMqtt311() {
         return this instanceof Mqtt311ConnectRequest;
     }

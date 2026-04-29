@@ -82,11 +82,13 @@ sequenceDiagram
 - 当前支持 QoS 0 / QoS 1 / QoS 2 订阅授予。
 - 当前 retained 下发发生在 SUBACK 之后，并受 MQTT 5 `Retain Handling` 控制。
 - 当前会保存 MQTT 5 `No Local`、`Retain As Published`、`Retain Handling` 和 `Subscription Identifier`。
+- MQTT 5 SUBSCRIBE `User Property` 会进入内部 `SubscriptionRequest.properties`，当前仅建模供后续策略扩展使用，不改变订阅结果。
 
 ### UNSUBSCRIBE
 
 - `protocol` 从会话真相和路由索引中移除对应订阅。
 - `transport` 返回按协议版本映射的 UNSUBACK。
+- MQTT 5 UNSUBSCRIBE `User Property` 会进入内部 `UnsubscribeRequest.properties`，当前仅建模供后续策略扩展使用，不改变取消订阅结果。
 
 ## Topic 匹配与去重
 
@@ -154,5 +156,5 @@ sequenceDiagram
 - 当前支持基础 will 保存、显式断连抑制和异常关闭发布。
 - 当前支持离线 QoS 1 积压与重连恢复。
 - 当前支持 retained QoS 2 存储与重放，但 will QoS 2 延后。
-- 当前支持 Subscription Options、Subscription Identifier 和 PUBLISH / Will User Property。
-- 当前不支持 CONNECT / CONNACK / SUBSCRIBE / SUBACK / DISCONNECT 等非发布语义报文的 User Property、共享订阅和除 Will User Property 外的高级 MQTT 5 will / retain 属性。
+- 当前支持 Subscription Options、Subscription Identifier、CONNECT / SUBSCRIBE / UNSUBSCRIBE request properties 建模和 PUBLISH / Will User Property 透传。
+- 当前不支持 CONNACK / SUBACK / UNSUBACK / DISCONNECT 等出站或非入站 request 的 User Property、共享订阅和除 Will User Property 外的高级 MQTT 5 will / retain 属性。

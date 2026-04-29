@@ -26,7 +26,7 @@ CONNECT 处理当前重点关注：
 
 1. `transport` 接收 CONNECT 并转换为 `ConnectRequest`。
 2. `protocol` 校验协议版本、连接参数和 `clientId` 规则。
-3. `auth` 对连接执行鉴权扩展点检查；当前主线默认放行。
+3. `auth` 对连接执行鉴权扩展点检查；MQTT 5 CONNECT `User Property` 会随 `ConnectRequest` 提供给鉴权扩展点，当前主线默认放行。
 4. `protocol` 解析当前请求是新建会话、恢复现有会话还是接管旧连接。
 5. `session` 更新会话归属，`connectionRegistry` 更新活跃连接索引。
 6. `transport` 返回 CONNACK，并在必要时关闭旧连接。

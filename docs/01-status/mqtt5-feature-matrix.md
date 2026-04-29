@@ -35,7 +35,7 @@
 | 状态管理 | Retained Message | M2 | 基础支持 | 基础支持 | 已验证 | 已覆盖写入、清除与订阅后下发；支持 QoS 2 retained 重放，不含高级 retain 属性 |
 | 状态管理 | Will Message | M2 | 基础支持 | 基础支持 | 已验证 | 已覆盖 CONNECT 保存、显式断连抑制、异常关闭发布、Will User Property 与 retain/QoS 1 联动；will QoS 2 延后 |
 | 状态管理 | Will Delay Interval | M5 | 不适用 | 不支持 | 未开始 | MQTT 5 高级遗嘱属性 |
-| MQTT 5 属性 | User Property | M3 | 不适用 | PUBLISH / Will 支持 | 已验证 | 已覆盖在线投递、retained replay、离线恢复、QoS 2 延迟路由和 will 发布 |
+| MQTT 5 属性 | User Property | M3 | 不适用 | 入站 CONNECT / SUBSCRIBE / UNSUBSCRIBE request properties 建模；PUBLISH / Will 透传 | 已验证 | 已覆盖 auth 可读取 CONNECT 属性、订阅/取消订阅 request 建模、在线投递、retained replay、离线恢复、QoS 2 延迟路由和 will 发布 |
 | MQTT 5 属性 | Message Expiry Interval | M3 | 不适用 | 不支持 | 未开始 | 与离线消息和过期策略联动 |
 | MQTT 5 属性 | Receive Maximum | M3 | 不适用 | 不支持 | 未开始 | 流控相关 |
 | MQTT 5 属性 | Maximum Packet Size | M3 | 不适用 | 不支持 | 未开始 | 连接协商与限制相关 |

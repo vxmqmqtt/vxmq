@@ -5,7 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishProperties;
-import io.github.vxmqmqtt.vxmq.protocol.model.PublishUserProperty;
+import io.github.vxmqmqtt.vxmq.protocol.model.MqttUserProperty;
+import io.github.vxmqmqtt.vxmq.protocol.model.MqttUserProperties;
 import io.github.vxmqmqtt.vxmq.protocol.model.WillMessage;
 import io.netty.handler.codec.mqtt.MqttQoS;
 import java.util.List;
@@ -83,7 +84,7 @@ class InMemorySessionRegistryWillTest {
     void shouldStoreWillMessageWithUserProperties() {
         InMemorySessionRegistry sessionRegistry = new InMemorySessionRegistry();
         PublishProperties properties = new PublishProperties(
-                List.of(new PublishUserProperty("trace", "will")));
+                new MqttUserProperties(List.of(new MqttUserProperty("trace", "will"))));
 
         SessionOpenResult openResult = sessionRegistry.openSession(
                 "client-will",
