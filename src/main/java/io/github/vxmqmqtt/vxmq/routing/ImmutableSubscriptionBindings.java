@@ -125,8 +125,7 @@ final class ImmutableSubscriptionBindings {
     private static void mergeBinding(
             SubscriptionBinding binding,
             Map<String, SubscriptionBinding> deduplicated) {
-        deduplicated.merge(binding.clientId(), binding, (left, right) ->
-                left.grantedQos().value() >= right.grantedQos().value() ? left : right);
+        deduplicated.merge(binding.clientId(), binding, SubscriptionBinding::mergeForLiveDelivery);
     }
 
     record RemoveResult(ImmutableSubscriptionBindings bindings, boolean removed) {

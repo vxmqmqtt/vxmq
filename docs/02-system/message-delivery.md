@@ -59,8 +59,10 @@ sequenceDiagram
 - 只有当前仍处于活跃状态的连接会收到在线消息。
 - 若目标会话无在线连接且为持久会话，最终投递 QoS 为 1 或 2 的消息会进入离线队列。
 - 若目标会话无在线连接且为非持久会话，当前直接跳过。
-- 若发布者同时也是订阅者，当前允许收到自己发布的消息。
+- 若发布者同时也是订阅者，默认允许收到自己发布的消息；MQTT 5 `No Local` 订阅会跳过同 `clientId` 发布者。
+- `Retain As Published=false` 的 MQTT 5 订阅会在普通在线/离线投递中清除出站 `retain` 标志；`true` 时保留入站发布的 `retain` 标志。
 - 同一客户端命中重叠订阅时，当前只投递一次。
+- MQTT 5 `Subscription Identifier` 会随在线、离线恢复和 retained replay 投递下发；同一客户端多个命中订阅会合并到同一出站 PUBLISH 的多个 identifier 属性。
 
 ## 订阅路径
 
@@ -75,7 +77,8 @@ sequenceDiagram
 当前行为：
 
 - 当前支持 QoS 0 / QoS 1 / QoS 2 订阅授予。
-- 当前 retained 下发固定发生在 SUBACK 之后。
+- 当前 retained 下发发生在 SUBACK 之后，并受 MQTT 5 `Retain Handling` 控制。
+- 当前会保存 MQTT 5 `No Local`、`Retain As Published`、`Retain Handling` 和 `Subscription Identifier`。
 
 ### UNSUBSCRIBE
 
@@ -87,6 +90,7 @@ sequenceDiagram
 - `routing` 同时检查精确路径、`+` 子节点和当前节点上的 `#` 绑定。
 - 最终命中集合会按 `clientId` 去重。
 - 若同一客户端命中多个订阅，最终投递 QoS 取更高 `grantedQos`。
+- 若同一客户端命中多个带 Subscription Identifier 的订阅，最终单次投递会携带所有命中的 identifier。
 
 ## QoS 1 语义
 
@@ -115,7 +119,8 @@ sequenceDiagram
 - `retain=true` 且 payload 为空时，删除该 Topic Name 的 retained 记录。
 - retained 发布本身仍继续走普通在线投递或离线 QoS 1 / QoS 2 入队路径。
 - 订阅成功后，命中的 retained 消息会在 SUBACK 之后立即下发。
-- MQTT 5 的 `Retain Handling` 和 `Retain Available` 当前未实现。
+- MQTT 5 `Retain Handling` 已支持 `SEND_AT_SUBSCRIBE`、`SEND_AT_SUBSCRIBE_IF_NOT_YET_EXISTS` 和 `DONT_SEND_AT_SUBSCRIBE`。
+- MQTT 5 `Retain Available` 当前未实现。
 
 ## Will 语义
 
@@ -143,4 +148,5 @@ sequenceDiagram
 - 当前支持基础 will 保存、显式断连抑制和异常关闭发布。
 - 当前支持离线 QoS 1 积压与重连恢复。
 - 当前支持 retained QoS 2 存储与重放，但 will QoS 2 延后。
-- 当前不支持 Subscription Options、Subscription Identifier、共享订阅和高级 MQTT 5 will / retain 属性。
+- 当前支持 Subscription Options 和 Subscription Identifier。
+- 当前不支持共享订阅和高级 MQTT 5 will / retain 属性。

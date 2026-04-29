@@ -1,6 +1,7 @@
 package io.github.vxmqmqtt.vxmq.session;
 
 import io.github.vxmqmqtt.vxmq.protocol.model.WillMessage;
+import io.github.vxmqmqtt.vxmq.routing.SubscriptionBinding;
 import io.netty.handler.codec.mqtt.MqttQoS;
 import java.time.Instant;
 import java.util.ArrayDeque;
@@ -24,7 +25,7 @@ public final class ClientSession {
     private volatile Long sessionExpiryIntervalSeconds;
     private volatile Instant expiresAt;
     // key: topicFilter, value: MqttQoS
-    private final Map<String, MqttQoS> subscriptions = new ConcurrentHashMap<>();
+    private final Map<String, SubscriptionBinding> subscriptions = new ConcurrentHashMap<>();
     private final Deque<QueuedMessage> queuedMessages = new ArrayDeque<>();
     // key: packetId, value: InflightMessage
     private final Map<Integer, InflightMessage> inflightMessages = new LinkedHashMap<>();
@@ -116,8 +117,8 @@ public final class ClientSession {
     /**
      * Stores or replaces one subscription entry on the session.
      */
-    public void putSubscription(String topicFilter, MqttQoS grantedQos) {
-        subscriptions.put(topicFilter, grantedQos);
+    public void putSubscription(SubscriptionBinding subscriptionBinding) {
+        subscriptions.put(subscriptionBinding.topicFilter(), subscriptionBinding);
     }
 
     /**
@@ -131,6 +132,14 @@ public final class ClientSession {
      * Returns the granted qos for a stored subscription, if present.
      */
     public MqttQoS subscriptionQos(String topicFilter) {
+        SubscriptionBinding subscription = subscriptions.get(topicFilter);
+        return subscription == null ? null : subscription.grantedQos();
+    }
+
+    /**
+     * Returns the stored subscription metadata for one filter, if present.
+     */
+    public SubscriptionBinding subscription(String topicFilter) {
         return subscriptions.get(topicFilter);
     }
 
@@ -167,7 +176,8 @@ public final class ClientSession {
                 message.payloadCopy(),
                 message.qos(),
                 message.retain(),
-                message.duplicate()));
+                message.duplicate(),
+                message.subscriptionIdentifiers()));
     }
 
     /**
@@ -180,6 +190,17 @@ public final class ClientSession {
             boolean retain,
             boolean duplicate,
             boolean fromOfflineQueue) {
+        return createInflightMessage(topicName, payload, qos, retain, duplicate, fromOfflineQueue, List.of());
+    }
+
+    public synchronized InflightMessage createInflightMessage(
+            String topicName,
+            byte[] payload,
+            MqttQoS qos,
+            boolean retain,
+            boolean duplicate,
+            boolean fromOfflineQueue,
+            List<Integer> subscriptionIdentifiers) {
         int packetId = allocatePacketId();
         OutboundQos2State qos2State = qos == MqttQoS.EXACTLY_ONCE ? OutboundQos2State.PUBLISH_SENT : null;
         InflightMessage inflightMessage = new InflightMessage(
@@ -190,7 +211,8 @@ public final class ClientSession {
                 retain,
                 duplicate,
                 fromOfflineQueue,
-                qos2State);
+                qos2State,
+                subscriptionIdentifiers);
         inflightMessages.put(packetId, inflightMessage);
         return inflightMessage;
     }
@@ -205,10 +227,11 @@ public final class ClientSession {
             drained.add(createInflightMessage(
                     queuedMessage.topicName(),
                     queuedMessage.payloadCopy(),
-                    queuedMessage.qos(),
-                    queuedMessage.retain(),
-                    queuedMessage.duplicate(),
-                    true));
+                queuedMessage.qos(),
+                queuedMessage.retain(),
+                queuedMessage.duplicate(),
+                true,
+                queuedMessage.subscriptionIdentifiers()));
         }
         return drained;
     }

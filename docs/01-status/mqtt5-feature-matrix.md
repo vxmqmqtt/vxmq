@@ -25,8 +25,8 @@
 | 发布订阅 | PUBLISH QoS 0 主链路 | M1 | 支持 | 支持 | 已验证 | 已具备最小端到端闭环 |
 | 发布订阅 | Topic Filter / Wildcard | M1 | 支持 | 支持 | 已验证 | 已支持 `+` 与 `#` |
 | 内部机制 | 订阅树 / 路由索引重构 | M2 | 不适用 | 不适用 | 已验证 | 已采用订阅树替换线性扫描索引，并补充基准对比 harness |
-| 发布订阅 | Subscription Options | M3 | 不适用 | 不支持 | 未开始 | 包括 `No Local`、`Retain As Published`、`Retain Handling` |
-| 发布订阅 | Subscription Identifier | M3 | 不适用 | 不支持 | 未开始 | MQTT 5 订阅标识 |
+| 发布订阅 | Subscription Options | M3 | 不适用 | 支持 | 已验证 | 已覆盖 `No Local`、`Retain As Published`、`Retain Handling` 与 retained replay 联动 |
+| 发布订阅 | Subscription Identifier | M3 | 不适用 | 支持 | 已验证 | 已支持单订阅、多订阅合并、retained replay 与离线恢复 |
 | 发布订阅 | Shared Subscription | M5 | 不适用 | 不支持 | 未开始 | 高级分发能力 |
 | QoS | QoS 1 | M2 | 基础支持 | 基础支持 | 已验证 | 已覆盖入站、出站、PUBACK 与离线恢复；不含后台重试 |
 | QoS | QoS 2 | M3 | 基础支持 | 基础支持 | 已验证 | 已覆盖 PUBREC / PUBREL / PUBCOMP、重复包、离线恢复与 retained 重放；will QoS 2 延后 |

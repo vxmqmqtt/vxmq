@@ -34,6 +34,7 @@ import io.github.vxmqmqtt.vxmq.transport.ClientConnection;
 import io.github.vxmqmqtt.vxmq.transport.ClientConnectionRegistry;
 import io.netty.handler.codec.mqtt.MqttConnectReturnCode;
 import io.netty.handler.codec.mqtt.MqttProperties;
+import io.netty.handler.codec.mqtt.MqttSubscriptionOption;
 import io.smallrye.mutiny.Uni;
 import io.vertx.mqtt.MqttAuth;
 import io.vertx.mqtt.MqttServerOptions;
@@ -174,7 +175,11 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                             .stream()
                             .map(subscription -> new SubscriptionItem(
                                     subscription.topicName(),
-                                    subscription.qualityOfService().value()))
+                                    subscription.qualityOfService().value(),
+                                    subscriptionOption(subscription).isNoLocal(),
+                                    subscriptionOption(subscription).isRetainAsPublished(),
+                                    subscriptionOption(subscription).retainHandling(),
+                                    subscriptionIdentifier(subscribe.properties())))
                             .collect(Collectors.toList())));
 
             if (connection.protocolVersion() == 5) {
@@ -365,6 +370,17 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
 
     private Uni<Integer> outboundPublish(MqttEndpoint endpoint, PublishDelivery delivery) {
         Buffer payload = delivery.payload() == null ? Buffer.buffer() : Buffer.buffer(delivery.payloadCopy());
+        MqttProperties publishProperties = publishProperties(endpoint.protocolVersion(), delivery);
+        if (!delivery.subscriptionIdentifiers().isEmpty() && endpoint.protocolVersion() == 5) {
+            return endpoint.publish(
+                    delivery.topicName(),
+                    payload,
+                    delivery.grantedQos(),
+                    delivery.duplicate(),
+                    delivery.retain(),
+                    delivery.packetId() == null ? 0 : delivery.packetId(),
+                    publishProperties);
+        }
         if (delivery.grantedQos().value() > 0 && delivery.packetId() != null) {
             return endpoint.publish(
                     delivery.topicName(),
@@ -380,6 +396,19 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                 delivery.grantedQos(),
                 delivery.duplicate(),
                 delivery.retain());
+    }
+
+    private MqttProperties publishProperties(int protocolVersion, PublishDelivery delivery) {
+        if (protocolVersion != 5 || delivery.subscriptionIdentifiers().isEmpty()) {
+            return MqttProperties.NO_PROPERTIES;
+        }
+        MqttProperties properties = new MqttProperties();
+        for (Integer subscriptionIdentifier : delivery.subscriptionIdentifiers()) {
+            properties.add(new MqttProperties.IntegerProperty(
+                    MqttProperties.MqttPropertyType.SUBSCRIPTION_IDENTIFIER.value(),
+                    subscriptionIdentifier));
+        }
+        return properties;
     }
 
     /**
@@ -412,6 +441,25 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
             return 0L;
         }
         return ((Number) property.value()).longValue();
+    }
+
+    private MqttSubscriptionOption subscriptionOption(io.vertx.mutiny.mqtt.MqttTopicSubscription subscription) {
+        MqttSubscriptionOption option = subscription.subscriptionOption();
+        return option == null
+                ? MqttSubscriptionOption.onlyFromQos(subscription.qualityOfService())
+                : option;
+    }
+
+    private Integer subscriptionIdentifier(MqttProperties subscribeProperties) {
+        if (subscribeProperties == null) {
+            return null;
+        }
+        MqttProperties.MqttProperty<?> property = subscribeProperties.getProperty(
+                MqttProperties.MqttPropertyType.SUBSCRIPTION_IDENTIFIER.value());
+        if (property == null || property.value() == null) {
+            return null;
+        }
+        return ((Number) property.value()).intValue();
     }
 
     private WillMessage willMessage(MqttWill will) {

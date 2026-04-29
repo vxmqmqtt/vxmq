@@ -42,11 +42,14 @@ import io.github.vxmqmqtt.vxmq.transport.ConnectionState;
 import io.netty.handler.codec.mqtt.MqttConnectReturnCode;
 import io.netty.handler.codec.mqtt.MqttProperties;
 import io.netty.handler.codec.mqtt.MqttQoS;
+import io.netty.handler.codec.mqtt.MqttSubscriptionOption.RetainedHandlingPolicy;
 import io.vertx.mqtt.messages.codes.MqttDisconnectReasonCode;
 import io.vertx.mqtt.messages.codes.MqttPubAckReasonCode;
 import io.vertx.mqtt.messages.codes.MqttSubAckReasonCode;
 import io.vertx.mqtt.messages.codes.MqttUnsubAckReasonCode;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -322,6 +325,69 @@ class DefaultProtocolEngineTest {
         assertEquals(MqttQoS.AT_MOST_ONCE, result.deliveryPlan().deliveries().getFirst().grantedQos());
     }
 
+    // Verifies that MQTT 5 No Local subscriptions do not receive publishes from the same client.
+    @Test
+    void shouldSkipNoLocalDeliveryForSameClientPublisher() {
+        ClientConnection client = connectClient("client-no-local", 5, true, false, 0L);
+        protocolEngine.handleSubscribe(client, new SubscriptionRequest(List.of(
+                new SubscriptionItem(
+                        "sensors/+/temperature",
+                        0,
+                        true,
+                        false,
+                        RetainedHandlingPolicy.SEND_AT_SUBSCRIBE,
+                        null))));
+
+        InboundPublishOutcome result = protocolEngine.handlePublish(client, new PublishRequest(
+                "sensors/room-1/temperature",
+                0,
+                0,
+                false,
+                false,
+                "payload".getBytes()));
+
+        assertTrue(result.deliveryPlan().deliveries().isEmpty());
+        assertEquals(0, result.deliveryPlan().queuedMessageCount());
+    }
+
+    // Verifies that Retain As Published controls the retain flag on live deliveries.
+    @Test
+    void shouldApplyRetainAsPublishedToLiveDeliveryRetainFlag() {
+        ClientConnection publisher = connectClient("publisher-rap-live", 5, true, false, 0L);
+        ClientConnection strippingSubscriber = connectClient("subscriber-rap-strip", 5, true, false, 0L);
+        ClientConnection preservingSubscriber = connectClient("subscriber-rap-preserve", 5, true, false, 0L);
+        protocolEngine.handleSubscribe(strippingSubscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem(
+                        "sensors/+/temperature",
+                        0,
+                        false,
+                        false,
+                        RetainedHandlingPolicy.SEND_AT_SUBSCRIBE,
+                        null))));
+        protocolEngine.handleSubscribe(preservingSubscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem(
+                        "sensors/+/temperature",
+                        0,
+                        false,
+                        true,
+                        RetainedHandlingPolicy.SEND_AT_SUBSCRIBE,
+                        null))));
+
+        InboundPublishOutcome result = protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                0,
+                0,
+                true,
+                false,
+                "payload".getBytes()));
+
+        assertEquals(2, result.deliveryPlan().deliveries().size());
+        PublishDelivery stripped = deliveryFor(result.deliveryPlan().deliveries(), "subscriber-rap-strip");
+        PublishDelivery preserved = deliveryFor(result.deliveryPlan().deliveries(), "subscriber-rap-preserve");
+        assertFalse(stripped.retain());
+        assertTrue(preserved.retain());
+    }
+
     // Verifies that online QoS 1 subscribers receive an inflight delivery with a packet id and a PUBACK requirement.
     @Test
     void shouldCreateInflightQos1DeliveryForOnlineSubscriber() {
@@ -377,6 +443,85 @@ class DefaultProtocolEngineTest {
         assertEquals("sensors/room-1/temperature", retainedDelivery.topicName());
         assertEquals(MqttQoS.AT_MOST_ONCE, retainedDelivery.grantedQos());
         assertTrue(retainedDelivery.retain());
+    }
+
+    // Verifies that Retain Handling can suppress replay when a subscription already exists.
+    @Test
+    void shouldReplayRetainedMessageOnlyForNewSubscriptionWhenRequested() {
+        ClientConnection publisher = connectClient("publisher-retain-handling-existing", 5, true, false, 0L);
+        protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                0,
+                0,
+                true,
+                false,
+                "retained-payload".getBytes()));
+        ClientConnection subscriber = connectClient("subscriber-retain-handling-existing", 5, true, false, 0L);
+
+        SubscribeOutcome firstSubscribe = protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 0))));
+        SubscribeOutcome replacementSubscribe = protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem(
+                        "sensors/+/temperature",
+                        0,
+                        false,
+                        false,
+                        RetainedHandlingPolicy.SEND_AT_SUBSCRIBE_IF_NOT_YET_EXISTS,
+                        null))));
+
+        assertEquals(1, firstSubscribe.retainedReplayPlan().deliveries().size());
+        assertTrue(replacementSubscribe.retainedReplayPlan().deliveries().isEmpty());
+    }
+
+    // Verifies that Retain Handling can completely suppress retained replay.
+    @Test
+    void shouldNotReplayRetainedMessageWhenRetainHandlingDisablesIt() {
+        ClientConnection publisher = connectClient("publisher-retain-handling-never", 5, true, false, 0L);
+        protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                0,
+                0,
+                true,
+                false,
+                "retained-payload".getBytes()));
+        ClientConnection subscriber = connectClient("subscriber-retain-handling-never", 5, true, false, 0L);
+
+        SubscribeOutcome subscribeResult = protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem(
+                        "sensors/+/temperature",
+                        0,
+                        false,
+                        false,
+                        RetainedHandlingPolicy.DONT_SEND_AT_SUBSCRIBE,
+                        null))));
+
+        assertTrue(subscribeResult.retainedReplayPlan().deliveries().isEmpty());
+    }
+
+    // Verifies that retained replay includes the subscription identifier from the matching subscription.
+    @Test
+    void shouldIncludeSubscriptionIdentifierOnRetainedReplay() {
+        ClientConnection publisher = connectClient("publisher-retained-identifier", 5, true, false, 0L);
+        protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                0,
+                0,
+                true,
+                false,
+                "retained-payload".getBytes()));
+        ClientConnection subscriber = connectClient("subscriber-retained-identifier", 5, true, false, 0L);
+
+        SubscribeOutcome subscribeResult = protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem(
+                        "sensors/+/temperature",
+                        0,
+                        false,
+                        false,
+                        RetainedHandlingPolicy.SEND_AT_SUBSCRIBE,
+                        17))));
+
+        PublishDelivery retainedDelivery = subscribeResult.retainedReplayPlan().deliveries().getFirst();
+        assertEquals(List.of(17), retainedDelivery.subscriptionIdentifiers());
     }
 
     // Verifies that retained publishes use the minimum of retained QoS and granted subscription QoS.
@@ -478,6 +623,40 @@ class DefaultProtocolEngineTest {
         assertEquals(MqttQoS.AT_LEAST_ONCE, resumedDeliveries.getFirst().grantedQos());
         assertEquals(1, sessionRegistry.find("subscriber-qos1-resume").orElseThrow().inflightMessageCount());
         assertEquals(0, sessionRegistry.find("subscriber-qos1-resume").orElseThrow().queuedMessageCount());
+    }
+
+    // Verifies that offline queued deliveries keep the subscription identifier used at routing time.
+    @Test
+    void shouldResumeQueuedMessageWithSubscriptionIdentifier() {
+        ClientConnection publisher = connectClient("publisher-identifier-resume", 5, true, false, 0L);
+        ClientConnection firstSubscriberConnection = connectClient("subscriber-identifier-resume", 5, false, false, 60L);
+        protocolEngine.handleSubscribe(firstSubscriberConnection, new SubscriptionRequest(List.of(
+                new SubscriptionItem(
+                        "sensors/+/temperature",
+                        1,
+                        false,
+                        false,
+                        RetainedHandlingPolicy.SEND_AT_SUBSCRIBE,
+                        21))));
+        closeClientConnection(firstSubscriberConnection);
+
+        protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                23,
+                1,
+                false,
+                false,
+                "payload".getBytes()));
+
+        ClientConnection secondSubscriberConnection = connectClient("subscriber-identifier-resume", 5, false, false, 60L);
+        SessionResumePlan resumePlan = protocolEngine.handleSessionResume(secondSubscriberConnection);
+        List<PublishDelivery> resumedDeliveries = resumePlan.actions().stream()
+                .map(ReplayPublish.class::cast)
+                .map(ReplayPublish::delivery)
+                .toList();
+
+        assertEquals(1, resumedDeliveries.size());
+        assertEquals(List.of(21), resumedDeliveries.getFirst().subscriptionIdentifiers());
     }
 
     // Verifies that inbound QoS 2 publish is routed only after PUBREL and duplicate PUBREL does not re-deliver.
@@ -614,6 +793,41 @@ class DefaultProtocolEngineTest {
 
         assertFalse(result.disconnectAction().isDisconnect());
         assertEquals(0, result.deliveryPlan().queuedMessageCount());
+    }
+
+    // Verifies that multiple matching subscriptions for one client produce one delivery with all identifiers.
+    @Test
+    void shouldMergeSubscriptionIdentifiersForMultipleMatchesToSameClient() {
+        ClientConnection publisher = connectClient("publisher-multi-identifier", 5, true, false, 0L);
+        ClientConnection subscriber = connectClient("subscriber-multi-identifier", 5, true, false, 0L);
+        protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem(
+                        "sensors/#",
+                        0,
+                        false,
+                        false,
+                        RetainedHandlingPolicy.SEND_AT_SUBSCRIBE,
+                        31),
+                new SubscriptionItem(
+                        "sensors/+/temperature",
+                        1,
+                        false,
+                        false,
+                        RetainedHandlingPolicy.SEND_AT_SUBSCRIBE,
+                        32))));
+
+        InboundPublishOutcome result = protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                24,
+                1,
+                false,
+                false,
+                "payload".getBytes()));
+
+        assertEquals(1, result.deliveryPlan().deliveries().size());
+        PublishDelivery delivery = result.deliveryPlan().deliveries().getFirst();
+        assertEquals(MqttQoS.AT_LEAST_ONCE, delivery.grantedQos());
+        assertEquals(Set.of(31, 32), new HashSet<>(delivery.subscriptionIdentifiers()));
     }
 
     // Verifies that topic names containing subscription wildcards are rejected for publish.
@@ -767,6 +981,13 @@ class DefaultProtocolEngineTest {
             long sessionExpiryIntervalSeconds,
             WillMessage willMessage) {
         return new Mqtt5ConnectRequest(clientId, "MQTT", cleanStart, sessionExpiryIntervalSeconds, null, false, willMessage);
+    }
+
+    private PublishDelivery deliveryFor(List<PublishDelivery> deliveries, String clientId) {
+        return deliveries.stream()
+                .filter(delivery -> clientId.equals(delivery.clientId()))
+                .findFirst()
+                .orElseThrow();
     }
 
     private void closeClientConnection(ClientConnection connection) {

@@ -14,6 +14,8 @@
 - MQTT 3.1.1 `Clean Session`
 - MQTT 5 `Clean Start / Session Expiry`
 - 持久会话订阅恢复与会话懒清理
+- MQTT 5 Subscription Options
+- MQTT 5 Subscription Identifier
 - QoS 1 入站与出站主链路
 - QoS 2 入站与出站状态机
 - 持久会话离线 QoS 1 消息积压与重连恢复
@@ -33,7 +35,7 @@
 
 - 当前实现是单机、内存态 Broker。
 - 当前主链路已覆盖 QoS 0 / QoS 1 / QoS 2；QoS 2 支持普通发布和 retained 重放，will QoS 2 延后。
-- 当前已实现会话过期的懒清理、持久会话订阅恢复、离线 QoS 1 消息恢复、Retained Message、基础 Will Message 和订阅树路由索引，但尚未实现用户名密码鉴权和 TLS。
+- 当前已实现会话过期的懒清理、持久会话订阅恢复、离线 QoS 1 消息恢复、Retained Message、基础 Will Message、订阅树路由索引、Subscription Options 和 Subscription Identifier，但尚未实现用户名密码鉴权和 TLS。
 - 当前路由和会话状态均为内存实现，不具备持久化和重启恢复能力。
 - 当前主线订阅树已采用 `snapshot / copy-on-write` 方案完成并发安全落地，并加入了更紧凑的不可变节点表示与内部 batch snapshot 重建路径；评估候选与 benchmark harness 作为独立评估套件保留。
 
@@ -55,6 +57,6 @@
 
 ## 下一阶段入口
 
-`M3` 的下一步重点从“内部基础设施升级”转向“协议完整性与运维补全”：Subscription Options、Subscription Identifier、基础鉴权和可观测性。
+`M3` 的下一步重点从“内部基础设施升级”转向“协议完整性与运维补全”：MQTT 5 关键属性、基础鉴权和可观测性。
 
 当前建议按 [`roadmap.md`](roadmap.md) 中的 `M3` 执行表推进并逐项更新状态。

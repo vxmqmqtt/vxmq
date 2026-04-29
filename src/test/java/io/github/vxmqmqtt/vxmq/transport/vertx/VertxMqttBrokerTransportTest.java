@@ -25,10 +25,16 @@ import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeAck;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeRequest;
 import io.github.vxmqmqtt.vxmq.transport.ClientConnection;
 import io.github.vxmqmqtt.vxmq.transport.ClientConnectionRegistry;
+import io.netty.handler.codec.mqtt.MqttQoS;
 import io.netty.handler.codec.mqtt.MqttProperties;
+import io.netty.handler.codec.mqtt.MqttSubscriptionOption;
+import io.netty.handler.codec.mqtt.MqttSubscriptionOption.RetainedHandlingPolicy;
+import io.smallrye.mutiny.Uni;
+import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
 import io.vertx.mqtt.messages.MqttPublishMessage;
+import io.vertx.mqtt.messages.MqttSubscribeMessage;
 import io.vertx.mqtt.messages.codes.MqttDisconnectReasonCode;
 import io.vertx.mqtt.messages.codes.MqttPubAckReasonCode;
 import io.vertx.mqtt.messages.codes.MqttPubRecReasonCode;
@@ -37,6 +43,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -181,6 +188,73 @@ class VertxMqttBrokerTransportTest {
         assertEquals(13, probe.publishReleasePacketId);
     }
 
+    // Verifies that MQTT 5 SUBSCRIBE options and Subscription Identifier are passed to the protocol engine.
+    @Test
+    void shouldMapMqtt5SubscribeOptionsAndIdentifier() throws Exception {
+        AtomicReference<SubscriptionRequest> capturedRequest = new AtomicReference<>();
+        ProtocolEngine protocolEngine = protocolEngineCapturingSubscribe(capturedRequest);
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngine,
+                new ClientConnectionRegistry(),
+                brokerEventSink());
+        ClientConnection connection = connectedClient("client-subscribe-options");
+        EndpointProbe probe = new EndpointProbe(5, true);
+
+        installHandlers(transport, connection, probe.endpoint());
+        probe.invokeSubscribeHandler(new SubscribeMessageProbe(
+                "sensors/+/temperature",
+                MqttQoS.AT_LEAST_ONCE,
+                true,
+                true,
+                RetainedHandlingPolicy.SEND_AT_SUBSCRIBE_IF_NOT_YET_EXISTS,
+                42).message());
+
+        assertNotNull(capturedRequest.get());
+        assertEquals(1, capturedRequest.get().items().size());
+        assertEquals("sensors/+/temperature", capturedRequest.get().items().getFirst().topicFilter());
+        assertEquals(1, capturedRequest.get().items().getFirst().requestedQos());
+        assertTrue(capturedRequest.get().items().getFirst().noLocal());
+        assertTrue(capturedRequest.get().items().getFirst().retainAsPublished());
+        assertEquals(
+                RetainedHandlingPolicy.SEND_AT_SUBSCRIBE_IF_NOT_YET_EXISTS,
+                capturedRequest.get().items().getFirst().retainHandling());
+        assertEquals(42, capturedRequest.get().items().getFirst().subscriptionIdentifier());
+    }
+
+    // Verifies that outbound MQTT 5 publishes include all matching Subscription Identifier properties.
+    @Test
+    void shouldAddSubscriptionIdentifiersToMqtt5PublishProperties() throws Exception {
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngineReturning(InboundPublishOutcome.rejected()),
+                new ClientConnectionRegistry(),
+                brokerEventSink());
+        EndpointProbe probe = new EndpointProbe(5, true);
+
+        publishToSubscriber(transport, probe.endpoint(), new PublishDelivery(
+                "subscriber-with-identifiers",
+                "sensors/room-1/temperature",
+                "payload".getBytes(),
+                MqttQoS.AT_LEAST_ONCE,
+                false,
+                false,
+                12,
+                false,
+                List.of(7, 9)));
+
+        assertNotNull(probe.publishProperties);
+        assertEquals(
+                List.of(7, 9),
+                probe.publishProperties.getProperties(
+                                MqttProperties.MqttPropertyType.SUBSCRIPTION_IDENTIFIER.value())
+                        .stream()
+                        .map(MqttProperties.MqttProperty::value)
+                        .toList());
+    }
+
     private static void installHandlers(
             VertxMqttBrokerTransport transport,
             ClientConnection connection,
@@ -191,6 +265,19 @@ class VertxMqttBrokerTransportTest {
                 MqttEndpoint.class);
         method.setAccessible(true);
         method.invoke(transport, connection, endpoint);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void publishToSubscriber(
+            VertxMqttBrokerTransport transport,
+            MqttEndpoint endpoint,
+            PublishDelivery delivery) throws Exception {
+        Method method = VertxMqttBrokerTransport.class.getDeclaredMethod(
+                "outboundPublish",
+                MqttEndpoint.class,
+                PublishDelivery.class);
+        method.setAccessible(true);
+        ((Uni<Integer>) method.invoke(transport, endpoint, delivery)).await().indefinitely();
     }
 
     private static ClientConnection connectedClient(String clientId) {
@@ -321,6 +408,65 @@ class VertxMqttBrokerTransportTest {
         };
     }
 
+    private static ProtocolEngine protocolEngineCapturingSubscribe(AtomicReference<SubscriptionRequest> capturedRequest) {
+        return new ProtocolEngine() {
+            @Override
+            public ConnectOutcome handleConnect(ClientConnection connection, ConnectRequest request) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public SubscribeOutcome handleSubscribe(ClientConnection connection, SubscriptionRequest request) {
+                capturedRequest.set(request);
+                return new SubscribeOutcome(
+                        new io.github.vxmqmqtt.vxmq.protocol.model.SubscribeAck(List.of()),
+                        io.github.vxmqmqtt.vxmq.protocol.model.RetainedReplayPlan.empty());
+            }
+
+            @Override
+            public UnsubscribeAck handleUnsubscribe(ClientConnection connection, UnsubscribeRequest request) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public InboundPublishOutcome handlePublish(ClientConnection connection, PublishRequest request) {
+                return InboundPublishOutcome.rejected();
+            }
+
+            @Override
+            public SessionResumePlan handleSessionResume(ClientConnection connection) {
+                return SessionResumePlan.empty();
+            }
+
+            @Override
+            public void handlePubAck(ClientConnection connection, int packetId) {
+            }
+
+            @Override
+            public InboundPubRelOutcome handlePubRel(ClientConnection connection, int packetId) {
+                return InboundPubRelOutcome.alreadyComplete();
+            }
+
+            @Override
+            public OutboundPubRecOutcome handlePubRec(ClientConnection connection, int packetId) {
+                return OutboundPubRecOutcome.send(io.vertx.mqtt.messages.codes.MqttPubRelReasonCode.SUCCESS);
+            }
+
+            @Override
+            public void handlePubComp(ClientConnection connection, int packetId) {
+            }
+
+            @Override
+            public void handleDisconnect(ClientConnection connection) {
+            }
+
+            @Override
+            public List<PublishDelivery> handleConnectionClosed(ClientConnection connection) {
+                return List.of();
+            }
+        };
+    }
+
     /**
      * Lightweight endpoint double that records which termination API was used and exposes installed handlers.
      */
@@ -338,9 +484,11 @@ class VertxMqttBrokerTransportTest {
         private int publishReceivedPacketId;
         private int publishReleasePacketId;
         private int publishCompletePacketId;
+        private MqttProperties publishProperties;
         private MqttDisconnectReasonCode disconnectReasonCode;
         private MqttProperties disconnectProperties;
         private Handler<MqttPublishMessage> publishHandler;
+        private Handler<MqttSubscribeMessage> subscribeHandler;
         private Handler<Integer> publishReleaseHandler;
         private Handler<Integer> publishReceivedHandler;
 
@@ -358,6 +506,10 @@ class VertxMqttBrokerTransportTest {
                             this.publishHandler = castHandler(args[0]);
                             yield proxy;
                         }
+                        case "subscribeHandler" -> {
+                            this.subscribeHandler = castSubscribeHandler(args[0]);
+                            yield proxy;
+                        }
                         case "publishReleaseHandler" -> {
                             this.publishReleaseHandler = castIntegerHandler(args[0]);
                             yield proxy;
@@ -366,7 +518,7 @@ class VertxMqttBrokerTransportTest {
                             this.publishReceivedHandler = castIntegerHandler(args[0]);
                             yield proxy;
                         }
-                        case "subscribeHandler", "unsubscribeHandler", "disconnectHandler",
+                        case "unsubscribeHandler", "disconnectHandler",
                                 "publishAcknowledgeHandler", "publishCompletionHandler", "closeHandler" -> proxy;
                         case "publishAcknowledge" -> {
                             this.publishAcknowledgeCalled = true;
@@ -386,6 +538,22 @@ class VertxMqttBrokerTransportTest {
                             this.publishCompleteCalled = true;
                             this.publishCompletePacketId = (int) args[0];
                             yield proxy;
+                        }
+                        case "subscribeAcknowledge" -> proxy;
+                        case "publish" -> {
+                            for (Object arg : args) {
+                                if (arg instanceof MqttProperties properties) {
+                                    this.publishProperties = properties;
+                                }
+                            }
+                            if (args.length > 0 && args[args.length - 1] instanceof Handler<?> handler) {
+                                @SuppressWarnings("unchecked")
+                                Handler<io.vertx.core.AsyncResult<Integer>> publishHandler =
+                                        (Handler<io.vertx.core.AsyncResult<Integer>>) handler;
+                                publishHandler.handle(Future.succeededFuture(1));
+                                yield proxy;
+                            }
+                            yield Future.succeededFuture(1);
                         }
                         case "close" -> {
                             this.closeCalled = true;
@@ -414,6 +582,11 @@ class VertxMqttBrokerTransportTest {
             publishHandler.handle(message);
         }
 
+        private void invokeSubscribeHandler(MqttSubscribeMessage message) {
+            assertNotNull(subscribeHandler);
+            subscribeHandler.handle(message);
+        }
+
         private void invokePublishReleaseHandler(int packetId) {
             assertNotNull(publishReleaseHandler);
             publishReleaseHandler.handle(packetId);
@@ -427,6 +600,11 @@ class VertxMqttBrokerTransportTest {
         @SuppressWarnings("unchecked")
         private static Handler<MqttPublishMessage> castHandler(Object value) {
             return (Handler<MqttPublishMessage>) value;
+        }
+
+        @SuppressWarnings("unchecked")
+        private static Handler<MqttSubscribeMessage> castSubscribeHandler(Object value) {
+            return (Handler<MqttSubscribeMessage>) value;
         }
 
         @SuppressWarnings("unchecked")
@@ -467,6 +645,40 @@ class VertxMqttBrokerTransportTest {
         }
 
         private MqttPublishMessage message() {
+            return message;
+        }
+    }
+
+    /**
+     * Lightweight subscribe message double for invoking the installed raw Vert.x subscribe handler.
+     */
+    private static final class SubscribeMessageProbe {
+
+        private final MqttSubscribeMessage message;
+
+        private SubscribeMessageProbe(
+                String topicFilter,
+                MqttQoS qos,
+                boolean noLocal,
+                boolean retainAsPublished,
+                RetainedHandlingPolicy retainHandling,
+                int subscriptionIdentifier) {
+            io.netty.handler.codec.mqtt.MqttTopicSubscription topicSubscription =
+                    new io.netty.handler.codec.mqtt.MqttTopicSubscription(
+                            topicFilter,
+                            new MqttSubscriptionOption(
+                                    qos,
+                                    noLocal,
+                                    retainAsPublished,
+                                    retainHandling));
+            MqttProperties properties = new MqttProperties();
+            properties.add(new MqttProperties.IntegerProperty(
+                    MqttProperties.MqttPropertyType.SUBSCRIPTION_IDENTIFIER.value(),
+                    subscriptionIdentifier));
+            this.message = MqttSubscribeMessage.create(10, List.of(topicSubscription), properties);
+        }
+
+        private MqttSubscribeMessage message() {
             return message;
         }
     }

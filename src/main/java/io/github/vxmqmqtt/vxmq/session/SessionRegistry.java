@@ -1,6 +1,7 @@
 package io.github.vxmqmqtt.vxmq.session;
 
 import io.github.vxmqmqtt.vxmq.protocol.model.WillMessage;
+import io.github.vxmqmqtt.vxmq.routing.SubscriptionBinding;
 import io.netty.handler.codec.mqtt.MqttQoS;
 
 import java.util.List;
@@ -29,7 +30,14 @@ public interface SessionRegistry {
     /**
      * Adds a topic filter to the client's session state.
      */
-    void addSubscription(String clientId, String topicFilter, MqttQoS grantedQos);
+    default void addSubscription(String clientId, String topicFilter, MqttQoS grantedQos) {
+        addSubscription(new SubscriptionBinding(clientId, topicFilter, grantedQos));
+    }
+
+    /**
+     * Adds a topic filter with MQTT 5 subscription metadata to the client's session state.
+     */
+    void addSubscription(SubscriptionBinding subscriptionBinding);
 
     /**
      * Removes a topic filter from the client's session state.
@@ -57,6 +65,19 @@ public interface SessionRegistry {
             boolean retain,
             boolean duplicate,
             boolean fromOfflineQueue);
+
+    /**
+     * Creates one inflight delivery with MQTT 5 subscription identifiers.
+     */
+    Optional<InflightMessage> createInflightMessage(
+            String clientId,
+            String topicName,
+            byte[] payload,
+            MqttQoS qos,
+            boolean retain,
+            boolean duplicate,
+            boolean fromOfflineQueue,
+            List<Integer> subscriptionIdentifiers);
 
     /**
      * Starts or reuses an inbound QoS 2 publish transaction for the publisher packet id.

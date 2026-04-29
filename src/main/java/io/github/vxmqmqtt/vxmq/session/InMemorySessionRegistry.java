@@ -2,6 +2,7 @@ package io.github.vxmqmqtt.vxmq.session;
 
 import io.github.vxmqmqtt.vxmq.config.BrokerRuntimeConfig;
 import io.github.vxmqmqtt.vxmq.protocol.model.WillMessage;
+import io.github.vxmqmqtt.vxmq.routing.SubscriptionBinding;
 import io.netty.handler.codec.mqtt.MqttQoS;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -112,8 +113,8 @@ public class InMemorySessionRegistry implements SessionRegistry {
     }
 
     @Override
-    public void addSubscription(String clientId, String topicFilter, MqttQoS grantedQos) {
-        sessionForMutation(clientId).putSubscription(topicFilter, grantedQos);
+    public void addSubscription(SubscriptionBinding subscriptionBinding) {
+        sessionForMutation(subscriptionBinding.clientId()).putSubscription(subscriptionBinding);
     }
 
     @Override
@@ -146,8 +147,28 @@ public class InMemorySessionRegistry implements SessionRegistry {
             boolean retain,
             boolean duplicate,
             boolean fromOfflineQueue) {
+        return createInflightMessage(clientId, topicName, payload, qos, retain, duplicate, fromOfflineQueue, List.of());
+    }
+
+    @Override
+    public Optional<InflightMessage> createInflightMessage(
+            String clientId,
+            String topicName,
+            byte[] payload,
+            MqttQoS qos,
+            boolean retain,
+            boolean duplicate,
+            boolean fromOfflineQueue,
+            List<Integer> subscriptionIdentifiers) {
         return find(clientId)
-                .map(session -> session.createInflightMessage(topicName, payload, qos, retain, duplicate, fromOfflineQueue));
+                .map(session -> session.createInflightMessage(
+                        topicName,
+                        payload,
+                        qos,
+                        retain,
+                        duplicate,
+                        fromOfflineQueue,
+                        subscriptionIdentifiers));
     }
 
     @Override

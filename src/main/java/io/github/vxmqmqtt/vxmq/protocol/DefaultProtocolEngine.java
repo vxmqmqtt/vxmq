@@ -49,6 +49,7 @@ import io.github.vxmqmqtt.vxmq.transport.ConnectionState;
 import io.netty.handler.codec.mqtt.MqttConnectReturnCode;
 import io.netty.handler.codec.mqtt.MqttProperties;
 import io.netty.handler.codec.mqtt.MqttQoS;
+import io.netty.handler.codec.mqtt.MqttSubscriptionOption.RetainedHandlingPolicy;
 import io.vertx.mqtt.messages.codes.MqttDisconnectReasonCode;
 import io.vertx.mqtt.messages.codes.MqttPubAckReasonCode;
 import io.vertx.mqtt.messages.codes.MqttPubRecReasonCode;
@@ -157,15 +158,25 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             }
 
             MqttQoS grantedQos = grantedSubscriptionQos(item.requestedQos());
+            SubscriptionBinding subscriptionBinding = new SubscriptionBinding(
+                    connection.effectiveClientId(),
+                    topicFilter,
+                    grantedQos,
+                    item.noLocal(),
+                    item.retainAsPublished(),
+                    item.retainHandling(),
+                    item.subscriptionIdentifier());
+            boolean subscriptionAlreadyExisted = sessionRegistry.find(connection.effectiveClientId())
+                    .map(session -> session.subscription(topicFilter) != null)
+                    .orElse(false);
             try {
-                sessionRegistry.addSubscription(connection.effectiveClientId(), topicFilter, grantedQos);
-                subscriptionRegistry.addSubscription(new SubscriptionBinding(
-                        connection.effectiveClientId(),
-                        topicFilter,
-                        grantedQos));
+                sessionRegistry.addSubscription(subscriptionBinding);
+                subscriptionRegistry.addSubscription(subscriptionBinding);
                 brokerEventSink.subscriptionAdded(connection, topicFilter);
                 results.add(SubscriptionItemResult.granted(topicFilter, grantedQos));
-                retainedDeliveries.addAll(buildRetainedDeliveries(connection.effectiveClientId(), topicFilter, grantedQos));
+                if (shouldReplayRetained(item.retainHandling(), subscriptionAlreadyExisted)) {
+                    retainedDeliveries.addAll(buildRetainedDeliveries(subscriptionBinding));
+                }
             } catch (RuntimeException exception) {
                 // Roll back the session view if the routing registry write fails.
                 sessionRegistry.removeSubscription(connection.effectiveClientId(), topicFilter);
@@ -250,7 +261,11 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         List<PublishDelivery> deliveries = new ArrayList<>();
         int queuedMessageCount = 0;
         for (SubscriptionBinding binding : subscriptionRegistry.match(request.topicName())) {
+            if (binding.noLocal() && binding.clientId().equals(connection.effectiveClientId())) {
+                continue;
+            }
             MqttQoS deliveryQos = grantedDeliveryQos(request.qos(), binding.grantedQos());
+            boolean deliveryRetain = binding.retainAsPublished() && request.retain();
             boolean online = connectionRegistry.findActiveConnectionId(binding.clientId()).isPresent();
             if (deliveryQos == MqttQoS.AT_MOST_ONCE) {
                 if (online) {
@@ -259,10 +274,11 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                             request.topicName(),
                             copyPayload(request.payload()),
                             MqttQoS.AT_MOST_ONCE,
-                            request.retain(),
+                            deliveryRetain,
                             false,
                             null,
-                            false));
+                            false,
+                            binding.subscriptionIdentifiers()));
                 }
                 continue;
             }
@@ -273,9 +289,10 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                                 request.topicName(),
                                 request.payload(),
                                 deliveryQos,
-                                request.retain(),
+                                deliveryRetain,
                                 false,
-                                false)
+                                false,
+                                binding.subscriptionIdentifiers())
                         .map(inflightMessage -> toPublishDelivery(binding.clientId(), inflightMessage))
                         .ifPresent(deliveries::add);
                 continue;
@@ -287,8 +304,9 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                         request.topicName(),
                         copyPayload(request.payload()),
                         deliveryQos,
-                        request.retain(),
-                        false));
+                        deliveryRetain,
+                        false,
+                        binding.subscriptionIdentifiers()));
                 queuedMessageCount++;
             }
         }
@@ -529,32 +547,42 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 grantedDeliveryQos(request.qos(), MqttQoS.EXACTLY_ONCE));
     }
 
-    private List<PublishDelivery> buildRetainedDeliveries(String clientId, String topicFilter, MqttQoS grantedQos) {
+    private boolean shouldReplayRetained(RetainedHandlingPolicy retainHandling, boolean subscriptionAlreadyExisted) {
+        return switch (retainHandling) {
+            case SEND_AT_SUBSCRIBE -> true;
+            case SEND_AT_SUBSCRIBE_IF_NOT_YET_EXISTS -> !subscriptionAlreadyExisted;
+            case DONT_SEND_AT_SUBSCRIBE -> false;
+        };
+    }
+
+    private List<PublishDelivery> buildRetainedDeliveries(SubscriptionBinding subscriptionBinding) {
         List<PublishDelivery> deliveries = new ArrayList<>();
-        for (RetainedMessage retainedMessage : retainedMessageRegistry.findMatching(topicFilter)) {
-            MqttQoS deliveryQos = grantedDeliveryQos(retainedMessage.qos().value(), grantedQos);
+        for (RetainedMessage retainedMessage : retainedMessageRegistry.findMatching(subscriptionBinding.topicFilter())) {
+            MqttQoS deliveryQos = grantedDeliveryQos(retainedMessage.qos().value(), subscriptionBinding.grantedQos());
             if (deliveryQos == MqttQoS.AT_MOST_ONCE) {
                 deliveries.add(new PublishDelivery(
-                        clientId,
+                        subscriptionBinding.clientId(),
                         retainedMessage.topicName(),
                         retainedMessage.payloadCopy(),
                         MqttQoS.AT_MOST_ONCE,
                         true,
                         false,
                         null,
-                        false));
+                        false,
+                        subscriptionBinding.subscriptionIdentifiers()));
                 continue;
             }
 
             sessionRegistry.createInflightMessage(
-                            clientId,
+                            subscriptionBinding.clientId(),
                             retainedMessage.topicName(),
                             retainedMessage.payloadCopy(),
                             deliveryQos,
                             true,
                             false,
-                            false)
-                    .map(inflightMessage -> toPublishDelivery(clientId, inflightMessage))
+                            false,
+                            subscriptionBinding.subscriptionIdentifiers())
+                    .map(inflightMessage -> toPublishDelivery(subscriptionBinding.clientId(), inflightMessage))
                     .ifPresent(deliveries::add);
         }
         return deliveries;
@@ -569,7 +597,8 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 inflightMessage.retain(),
                 inflightMessage.duplicate(),
                 inflightMessage.packetId(),
-                inflightMessage.fromOfflineQueue());
+                inflightMessage.fromOfflineQueue(),
+                inflightMessage.subscriptionIdentifiers());
     }
 
     private byte[] copyPayload(byte[] payload) {
