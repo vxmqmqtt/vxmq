@@ -1,6 +1,7 @@
 package io.github.vxmqmqtt.vxmq.session;
 
 import io.github.vxmqmqtt.vxmq.protocol.model.WillMessage;
+import io.github.vxmqmqtt.vxmq.protocol.model.PublishProperties;
 import io.github.vxmqmqtt.vxmq.routing.SubscriptionBinding;
 import io.netty.handler.codec.mqtt.MqttQoS;
 
@@ -80,6 +81,20 @@ public interface SessionRegistry {
             List<Integer> subscriptionIdentifiers);
 
     /**
+     * Creates one inflight delivery with MQTT 5 PUBLISH properties and subscription identifiers.
+     */
+    Optional<InflightMessage> createInflightMessage(
+            String clientId,
+            String topicName,
+            byte[] payload,
+            MqttQoS qos,
+            boolean retain,
+            boolean duplicate,
+            boolean fromOfflineQueue,
+            PublishProperties properties,
+            List<Integer> subscriptionIdentifiers);
+
+    /**
      * Starts or reuses an inbound QoS 2 publish transaction for the publisher packet id.
      */
     Optional<InboundQos2Message> startInboundQos2Message(
@@ -89,6 +104,18 @@ public interface SessionRegistry {
             byte[] payload,
             boolean retain,
             boolean duplicate);
+
+    /**
+     * Starts or reuses an inbound QoS 2 publish transaction with MQTT 5 PUBLISH properties.
+     */
+    Optional<InboundQos2Message> startInboundQos2Message(
+            String clientId,
+            int packetId,
+            String topicName,
+            byte[] payload,
+            boolean retain,
+            boolean duplicate,
+            PublishProperties properties);
 
     /**
      * Completes and removes an inbound QoS 2 transaction after PUBREL.

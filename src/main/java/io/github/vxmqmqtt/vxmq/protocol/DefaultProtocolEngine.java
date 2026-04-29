@@ -242,7 +242,8 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                     request.topicName(),
                     request.payload(),
                     request.retain(),
-                    request.duplicate());
+                    request.duplicate(),
+                    request.properties());
             return InboundPublishOutcome.deferred(PublishAcknowledgement.pubRec(MqttPubRecReasonCode.SUCCESS));
         }
 
@@ -278,6 +279,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                             false,
                             null,
                             false,
+                            request.properties(),
                             binding.subscriptionIdentifiers()));
                 }
                 continue;
@@ -292,6 +294,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                                 deliveryRetain,
                                 false,
                                 false,
+                                request.properties(),
                                 binding.subscriptionIdentifiers())
                         .map(inflightMessage -> toPublishDelivery(binding.clientId(), inflightMessage))
                         .ifPresent(deliveries::add);
@@ -306,6 +309,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                         deliveryQos,
                         deliveryRetain,
                         false,
+                        request.properties(),
                         binding.subscriptionIdentifiers()));
                 queuedMessageCount++;
             }
@@ -374,7 +378,8 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 2,
                 inboundMessage.retain(),
                 inboundMessage.duplicate(),
-                inboundMessage.payloadCopy()));
+                inboundMessage.payloadCopy(),
+                inboundMessage.properties()));
         return InboundPubRelOutcome.completed(
                 DeliveryPlan.of(routingResult.deliveries(), routingResult.queuedMessageCount()));
     }
@@ -544,7 +549,8 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         retainedMessageRegistry.putRetained(
                 request.topicName(),
                 request.payload(),
-                grantedDeliveryQos(request.qos(), MqttQoS.EXACTLY_ONCE));
+                grantedDeliveryQos(request.qos(), MqttQoS.EXACTLY_ONCE),
+                request.properties());
     }
 
     private boolean shouldReplayRetained(RetainedHandlingPolicy retainHandling, boolean subscriptionAlreadyExisted) {
@@ -569,6 +575,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                         false,
                         null,
                         false,
+                        retainedMessage.properties(),
                         subscriptionBinding.subscriptionIdentifiers()));
                 continue;
             }
@@ -581,6 +588,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                             true,
                             false,
                             false,
+                            retainedMessage.properties(),
                             subscriptionBinding.subscriptionIdentifiers())
                     .map(inflightMessage -> toPublishDelivery(subscriptionBinding.clientId(), inflightMessage))
                     .ifPresent(deliveries::add);
@@ -598,6 +606,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 inflightMessage.duplicate(),
                 inflightMessage.packetId(),
                 inflightMessage.fromOfflineQueue(),
+                inflightMessage.properties(),
                 inflightMessage.subscriptionIdentifiers());
     }
 

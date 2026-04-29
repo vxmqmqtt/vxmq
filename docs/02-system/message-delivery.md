@@ -42,6 +42,7 @@ sequenceDiagram
 - `retain`
 - `dup`
 - `payload`
+- MQTT 5 PUBLISH properties：当前支持 `User Property`
 
 ### 处理流程
 
@@ -63,6 +64,8 @@ sequenceDiagram
 - `Retain As Published=false` 的 MQTT 5 订阅会在普通在线/离线投递中清除出站 `retain` 标志；`true` 时保留入站发布的 `retain` 标志。
 - 同一客户端命中重叠订阅时，当前只投递一次。
 - MQTT 5 `Subscription Identifier` 会随在线、离线恢复和 retained replay 投递下发；同一客户端多个命中订阅会合并到同一出站 PUBLISH 的多个 identifier 属性。
+- MQTT 5 PUBLISH `User Property` 会按入站顺序透传；重复 key 不会合并或去重。
+- `User Property` 会随在线投递、离线恢复、retained replay 和 QoS 2 延迟路由保留。
 
 ## 订阅路径
 
@@ -139,7 +142,8 @@ sequenceDiagram
 
 - MQTT 3.1.1 与 MQTT 5 的发布订阅主链路基本一致。
 - MQTT 5 在当前实现中会返回显式 reason code 或 `PUBACK(Success)`；MQTT 3.1.1 使用基础返回报文或直接关闭连接。
-- 差异主要体现在异常断连、reason code 表达和后续高级属性，而不是基础投递主流程。
+- MQTT 5 出站 PUBLISH 会携带当前支持的 properties；MQTT 3.1.1 出站路径不会写 MQTT 5 properties。
+- 差异主要体现在异常断连、reason code 表达和 MQTT 5 属性，而不是基础投递主流程。
 
 ## 当前实现边界
 
@@ -148,5 +152,5 @@ sequenceDiagram
 - 当前支持基础 will 保存、显式断连抑制和异常关闭发布。
 - 当前支持离线 QoS 1 积压与重连恢复。
 - 当前支持 retained QoS 2 存储与重放，但 will QoS 2 延后。
-- 当前支持 Subscription Options 和 Subscription Identifier。
-- 当前不支持共享订阅和高级 MQTT 5 will / retain 属性。
+- 当前支持 Subscription Options、Subscription Identifier 和 PUBLISH User Property。
+- 当前不支持非 PUBLISH 报文 User Property、共享订阅和高级 MQTT 5 will / retain 属性。

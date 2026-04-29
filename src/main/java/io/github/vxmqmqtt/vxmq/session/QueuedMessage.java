@@ -1,5 +1,6 @@
 package io.github.vxmqmqtt.vxmq.session;
 
+import io.github.vxmqmqtt.vxmq.protocol.model.PublishProperties;
 import io.netty.handler.codec.mqtt.MqttQoS;
 import java.util.List;
 
@@ -12,13 +13,25 @@ public record QueuedMessage(
         MqttQoS qos,
         boolean retain,
         boolean duplicate,
+        PublishProperties properties,
         List<Integer> subscriptionIdentifiers) {
 
     public QueuedMessage(String topicName, byte[] payload, MqttQoS qos, boolean retain, boolean duplicate) {
-        this(topicName, payload, qos, retain, duplicate, List.of());
+        this(topicName, payload, qos, retain, duplicate, PublishProperties.empty(), List.of());
+    }
+
+    public QueuedMessage(
+            String topicName,
+            byte[] payload,
+            MqttQoS qos,
+            boolean retain,
+            boolean duplicate,
+            List<Integer> subscriptionIdentifiers) {
+        this(topicName, payload, qos, retain, duplicate, PublishProperties.empty(), subscriptionIdentifiers);
     }
 
     public QueuedMessage {
+        properties = properties == null ? PublishProperties.empty() : properties;
         subscriptionIdentifiers = List.copyOf(subscriptionIdentifiers);
     }
 

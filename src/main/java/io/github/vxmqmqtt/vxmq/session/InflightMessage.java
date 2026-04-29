@@ -1,5 +1,6 @@
 package io.github.vxmqmqtt.vxmq.session;
 
+import io.github.vxmqmqtt.vxmq.protocol.model.PublishProperties;
 import io.netty.handler.codec.mqtt.MqttQoS;
 import java.util.List;
 
@@ -15,6 +16,7 @@ public record InflightMessage(
         boolean duplicate,
         boolean fromOfflineQueue,
         OutboundQos2State qos2State,
+        PublishProperties properties,
         List<Integer> subscriptionIdentifiers) {
 
     public InflightMessage(
@@ -25,7 +27,17 @@ public record InflightMessage(
             boolean retain,
             boolean duplicate,
             boolean fromOfflineQueue) {
-        this(packetId, topicName, payload, qos, retain, duplicate, fromOfflineQueue, null, List.of());
+        this(
+                packetId,
+                topicName,
+                payload,
+                qos,
+                retain,
+                duplicate,
+                fromOfflineQueue,
+                null,
+                PublishProperties.empty(),
+                List.of());
     }
 
     public InflightMessage(
@@ -37,10 +49,44 @@ public record InflightMessage(
             boolean duplicate,
             boolean fromOfflineQueue,
             OutboundQos2State qos2State) {
-        this(packetId, topicName, payload, qos, retain, duplicate, fromOfflineQueue, qos2State, List.of());
+        this(
+                packetId,
+                topicName,
+                payload,
+                qos,
+                retain,
+                duplicate,
+                fromOfflineQueue,
+                qos2State,
+                PublishProperties.empty(),
+                List.of());
+    }
+
+    public InflightMessage(
+            int packetId,
+            String topicName,
+            byte[] payload,
+            MqttQoS qos,
+            boolean retain,
+            boolean duplicate,
+            boolean fromOfflineQueue,
+            OutboundQos2State qos2State,
+            List<Integer> subscriptionIdentifiers) {
+        this(
+                packetId,
+                topicName,
+                payload,
+                qos,
+                retain,
+                duplicate,
+                fromOfflineQueue,
+                qos2State,
+                PublishProperties.empty(),
+                subscriptionIdentifiers);
     }
 
     public InflightMessage {
+        properties = properties == null ? PublishProperties.empty() : properties;
         subscriptionIdentifiers = List.copyOf(subscriptionIdentifiers);
     }
 
@@ -54,6 +100,7 @@ public record InflightMessage(
                 qos,
                 retain,
                 true,
+                properties,
                 subscriptionIdentifiers);
     }
 
@@ -67,6 +114,7 @@ public record InflightMessage(
                 newDuplicate,
                 fromOfflineQueue,
                 qos2State,
+                properties,
                 subscriptionIdentifiers);
     }
 
@@ -80,6 +128,7 @@ public record InflightMessage(
                 duplicate,
                 fromOfflineQueue,
                 newQos2State,
+                properties,
                 subscriptionIdentifiers);
     }
 

@@ -1,5 +1,6 @@
 package io.github.vxmqmqtt.vxmq.session;
 
+import io.github.vxmqmqtt.vxmq.protocol.model.PublishProperties;
 import io.github.vxmqmqtt.vxmq.protocol.model.WillMessage;
 import io.github.vxmqmqtt.vxmq.routing.SubscriptionBinding;
 import io.netty.handler.codec.mqtt.MqttQoS;
@@ -177,6 +178,7 @@ public final class ClientSession {
                 message.qos(),
                 message.retain(),
                 message.duplicate(),
+                message.properties(),
                 message.subscriptionIdentifiers()));
     }
 
@@ -190,7 +192,15 @@ public final class ClientSession {
             boolean retain,
             boolean duplicate,
             boolean fromOfflineQueue) {
-        return createInflightMessage(topicName, payload, qos, retain, duplicate, fromOfflineQueue, List.of());
+        return createInflightMessage(
+                topicName,
+                payload,
+                qos,
+                retain,
+                duplicate,
+                fromOfflineQueue,
+                PublishProperties.empty(),
+                List.of());
     }
 
     public synchronized InflightMessage createInflightMessage(
@@ -200,6 +210,26 @@ public final class ClientSession {
             boolean retain,
             boolean duplicate,
             boolean fromOfflineQueue,
+            List<Integer> subscriptionIdentifiers) {
+        return createInflightMessage(
+                topicName,
+                payload,
+                qos,
+                retain,
+                duplicate,
+                fromOfflineQueue,
+                PublishProperties.empty(),
+                subscriptionIdentifiers);
+    }
+
+    public synchronized InflightMessage createInflightMessage(
+            String topicName,
+            byte[] payload,
+            MqttQoS qos,
+            boolean retain,
+            boolean duplicate,
+            boolean fromOfflineQueue,
+            PublishProperties properties,
             List<Integer> subscriptionIdentifiers) {
         int packetId = allocatePacketId();
         OutboundQos2State qos2State = qos == MqttQoS.EXACTLY_ONCE ? OutboundQos2State.PUBLISH_SENT : null;
@@ -212,6 +242,7 @@ public final class ClientSession {
                 duplicate,
                 fromOfflineQueue,
                 qos2State,
+                properties,
                 subscriptionIdentifiers);
         inflightMessages.put(packetId, inflightMessage);
         return inflightMessage;
@@ -228,10 +259,11 @@ public final class ClientSession {
                     queuedMessage.topicName(),
                     queuedMessage.payloadCopy(),
                 queuedMessage.qos(),
-                queuedMessage.retain(),
-                queuedMessage.duplicate(),
-                true,
-                queuedMessage.subscriptionIdentifiers()));
+                    queuedMessage.retain(),
+                    queuedMessage.duplicate(),
+                    true,
+                    queuedMessage.properties(),
+                    queuedMessage.subscriptionIdentifiers()));
         }
         return drained;
     }
@@ -245,12 +277,23 @@ public final class ClientSession {
             byte[] payload,
             boolean retain,
             boolean duplicate) {
+        return startInboundQos2Message(packetId, topicName, payload, retain, duplicate, PublishProperties.empty());
+    }
+
+    public synchronized InboundQos2Message startInboundQos2Message(
+            int packetId,
+            String topicName,
+            byte[] payload,
+            boolean retain,
+            boolean duplicate,
+            PublishProperties properties) {
         return inboundQos2Messages.computeIfAbsent(packetId, ignored -> new InboundQos2Message(
                 packetId,
                 topicName,
                 payload == null ? null : payload.clone(),
                 retain,
-                duplicate));
+                duplicate,
+                properties));
     }
 
     /**

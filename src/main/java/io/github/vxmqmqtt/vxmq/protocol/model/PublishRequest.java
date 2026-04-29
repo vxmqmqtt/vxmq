@@ -9,7 +9,22 @@ public record PublishRequest(
         int qos,
         boolean retain,
         boolean duplicate,
-        byte[] payload) {
+        byte[] payload,
+        PublishProperties properties) {
+
+    public PublishRequest(
+            String topicName,
+            int packetId,
+            int qos,
+            boolean retain,
+            boolean duplicate,
+            byte[] payload) {
+        this(topicName, packetId, qos, retain, duplicate, payload, PublishProperties.empty());
+    }
+
+    public PublishRequest {
+        properties = properties == null ? PublishProperties.empty() : properties;
+    }
 
     /**
      * Returns the payload size without forcing callers to handle null payloads.

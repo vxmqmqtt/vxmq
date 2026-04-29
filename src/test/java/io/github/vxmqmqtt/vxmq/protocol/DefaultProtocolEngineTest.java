@@ -14,7 +14,9 @@ import io.github.vxmqmqtt.vxmq.protocol.model.ConnectRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.InboundPubRelOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.InboundPublishOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishDelivery;
+import io.github.vxmqmqtt.vxmq.protocol.model.PublishProperties;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.PublishUserProperty;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishAcknowledgementType;
 import io.github.vxmqmqtt.vxmq.protocol.model.Mqtt311ConnectRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.Mqtt5ConnectRequest;
@@ -325,6 +327,31 @@ class DefaultProtocolEngineTest {
         assertEquals(MqttQoS.AT_MOST_ONCE, result.deliveryPlan().deliveries().getFirst().grantedQos());
     }
 
+    // Verifies that online deliveries preserve MQTT 5 PUBLISH User Property order and duplicate keys.
+    @Test
+    void shouldPreserveUserPropertiesForOnlinePublishDelivery() {
+        ClientConnection publisher = connectClient("publisher-user-properties", 5, true, false, 0L);
+        ClientConnection subscriber = connectClient("subscriber-user-properties", 5, true, false, 0L);
+        protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 0))));
+
+        InboundPublishOutcome result = protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                0,
+                0,
+                false,
+                false,
+                "payload".getBytes(),
+                userProperties(
+                        new PublishUserProperty("trace", "a"),
+                        new PublishUserProperty("trace", "b"))));
+
+        assertEquals(1, result.deliveryPlan().deliveries().size());
+        assertEquals(
+                List.of(new PublishUserProperty("trace", "a"), new PublishUserProperty("trace", "b")),
+                result.deliveryPlan().deliveries().getFirst().properties().userProperties());
+    }
+
     // Verifies that MQTT 5 No Local subscriptions do not receive publishes from the same client.
     @Test
     void shouldSkipNoLocalDeliveryForSameClientPublisher() {
@@ -524,6 +551,29 @@ class DefaultProtocolEngineTest {
         assertEquals(List.of(17), retainedDelivery.subscriptionIdentifiers());
     }
 
+    // Verifies that retained replay preserves the original PUBLISH User Property list.
+    @Test
+    void shouldPreserveUserPropertiesForRetainedReplay() {
+        ClientConnection publisher = connectClient("publisher-retained-user-properties", 5, true, false, 0L);
+        protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                0,
+                0,
+                true,
+                false,
+                "retained-payload".getBytes(),
+                userProperties(new PublishUserProperty("source", "retained"))));
+        ClientConnection subscriber = connectClient("subscriber-retained-user-properties", 5, true, false, 0L);
+
+        SubscribeOutcome subscribeResult = protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 0))));
+
+        PublishDelivery retainedDelivery = subscribeResult.retainedReplayPlan().deliveries().getFirst();
+        assertEquals(
+                List.of(new PublishUserProperty("source", "retained")),
+                retainedDelivery.properties().userProperties());
+    }
+
     // Verifies that retained publishes use the minimum of retained QoS and granted subscription QoS.
     @Test
     void shouldUseMinimumQosForRetainedReplay() {
@@ -659,6 +709,39 @@ class DefaultProtocolEngineTest {
         assertEquals(List.of(21), resumedDeliveries.getFirst().subscriptionIdentifiers());
     }
 
+    // Verifies that offline queued deliveries preserve User Property values across reconnect.
+    @Test
+    void shouldResumeQueuedMessageWithUserProperties() {
+        ClientConnection publisher = connectClient("publisher-user-properties-resume", 5, true, false, 0L);
+        ClientConnection firstSubscriberConnection =
+                connectClient("subscriber-user-properties-resume", 5, false, false, 60L);
+        protocolEngine.handleSubscribe(firstSubscriberConnection, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 1))));
+        closeClientConnection(firstSubscriberConnection);
+
+        protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                23,
+                1,
+                false,
+                false,
+                "payload".getBytes(),
+                userProperties(new PublishUserProperty("offline", "yes"))));
+
+        ClientConnection secondSubscriberConnection =
+                connectClient("subscriber-user-properties-resume", 5, false, false, 60L);
+        SessionResumePlan resumePlan = protocolEngine.handleSessionResume(secondSubscriberConnection);
+        List<PublishDelivery> resumedDeliveries = resumePlan.actions().stream()
+                .map(ReplayPublish.class::cast)
+                .map(ReplayPublish::delivery)
+                .toList();
+
+        assertEquals(1, resumedDeliveries.size());
+        assertEquals(
+                List.of(new PublishUserProperty("offline", "yes")),
+                resumedDeliveries.getFirst().properties().userProperties());
+    }
+
     // Verifies that inbound QoS 2 publish is routed only after PUBREL and duplicate PUBREL does not re-deliver.
     @Test
     void shouldRouteQos2PublishOnlyAfterPubRel() {
@@ -687,6 +770,31 @@ class DefaultProtocolEngineTest {
         assertEquals(0, sessionRegistry.find("publisher-qos2-inbound").orElseThrow().inboundQos2MessageCount());
         assertEquals(1, sessionRegistry.find("subscriber-qos2-inbound").orElseThrow().inflightMessageCount());
         assertTrue(protocolEngine.handlePubRel(publisher, 45).deliveryPlan().isEmpty());
+    }
+
+    // Verifies that QoS 2 delayed routing preserves User Property values saved with the inbound PUBLISH.
+    @Test
+    void shouldPreserveUserPropertiesForQos2PublishAfterPubRel() {
+        ClientConnection publisher = connectClient("publisher-qos2-user-properties", 5, true, false, 0L);
+        ClientConnection subscriber = connectClient("subscriber-qos2-user-properties", 5, false, false, 60L);
+        protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 2))));
+
+        protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                49,
+                2,
+                false,
+                false,
+                "payload-qos2".getBytes(),
+                userProperties(new PublishUserProperty("qos", "2"))));
+
+        InboundPubRelOutcome pubRelResult = protocolEngine.handlePubRel(publisher, 49);
+
+        assertEquals(1, pubRelResult.deliveryPlan().deliveries().size());
+        assertEquals(
+                List.of(new PublishUserProperty("qos", "2")),
+                pubRelResult.deliveryPlan().deliveries().getFirst().properties().userProperties());
     }
 
     // Verifies that outbound QoS 2 advances on PUBREC and clears on PUBCOMP.
@@ -981,6 +1089,10 @@ class DefaultProtocolEngineTest {
             long sessionExpiryIntervalSeconds,
             WillMessage willMessage) {
         return new Mqtt5ConnectRequest(clientId, "MQTT", cleanStart, sessionExpiryIntervalSeconds, null, false, willMessage);
+    }
+
+    private PublishProperties userProperties(PublishUserProperty... userProperties) {
+        return new PublishProperties(List.of(userProperties));
     }
 
     private PublishDelivery deliveryFor(List<PublishDelivery> deliveries, String clientId) {

@@ -1,6 +1,7 @@
 package io.github.vxmqmqtt.vxmq.session;
 
 import io.github.vxmqmqtt.vxmq.config.BrokerRuntimeConfig;
+import io.github.vxmqmqtt.vxmq.protocol.model.PublishProperties;
 import io.github.vxmqmqtt.vxmq.protocol.model.WillMessage;
 import io.github.vxmqmqtt.vxmq.routing.SubscriptionBinding;
 import io.netty.handler.codec.mqtt.MqttQoS;
@@ -147,7 +148,16 @@ public class InMemorySessionRegistry implements SessionRegistry {
             boolean retain,
             boolean duplicate,
             boolean fromOfflineQueue) {
-        return createInflightMessage(clientId, topicName, payload, qos, retain, duplicate, fromOfflineQueue, List.of());
+        return createInflightMessage(
+                clientId,
+                topicName,
+                payload,
+                qos,
+                retain,
+                duplicate,
+                fromOfflineQueue,
+                PublishProperties.empty(),
+                List.of());
     }
 
     @Override
@@ -160,6 +170,29 @@ public class InMemorySessionRegistry implements SessionRegistry {
             boolean duplicate,
             boolean fromOfflineQueue,
             List<Integer> subscriptionIdentifiers) {
+        return createInflightMessage(
+                clientId,
+                topicName,
+                payload,
+                qos,
+                retain,
+                duplicate,
+                fromOfflineQueue,
+                PublishProperties.empty(),
+                subscriptionIdentifiers);
+    }
+
+    @Override
+    public Optional<InflightMessage> createInflightMessage(
+            String clientId,
+            String topicName,
+            byte[] payload,
+            MqttQoS qos,
+            boolean retain,
+            boolean duplicate,
+            boolean fromOfflineQueue,
+            PublishProperties properties,
+            List<Integer> subscriptionIdentifiers) {
         return find(clientId)
                 .map(session -> session.createInflightMessage(
                         topicName,
@@ -168,6 +201,7 @@ public class InMemorySessionRegistry implements SessionRegistry {
                         retain,
                         duplicate,
                         fromOfflineQueue,
+                        properties,
                         subscriptionIdentifiers));
     }
 
@@ -179,8 +213,27 @@ public class InMemorySessionRegistry implements SessionRegistry {
             byte[] payload,
             boolean retain,
             boolean duplicate) {
+        return startInboundQos2Message(
+                clientId,
+                packetId,
+                topicName,
+                payload,
+                retain,
+                duplicate,
+                PublishProperties.empty());
+    }
+
+    @Override
+    public Optional<InboundQos2Message> startInboundQos2Message(
+            String clientId,
+            int packetId,
+            String topicName,
+            byte[] payload,
+            boolean retain,
+            boolean duplicate,
+            PublishProperties properties) {
         return find(clientId)
-                .map(session -> session.startInboundQos2Message(packetId, topicName, payload, retain, duplicate));
+                .map(session -> session.startInboundQos2Message(packetId, topicName, payload, retain, duplicate, properties));
     }
 
     @Override

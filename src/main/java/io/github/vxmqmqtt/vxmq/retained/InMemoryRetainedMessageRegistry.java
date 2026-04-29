@@ -1,5 +1,6 @@
 package io.github.vxmqmqtt.vxmq.retained;
 
+import io.github.vxmqmqtt.vxmq.protocol.model.PublishProperties;
 import io.github.vxmqmqtt.vxmq.routing.MqttTopicSupport;
 import io.netty.handler.codec.mqtt.MqttQoS;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -24,12 +25,13 @@ public class InMemoryRetainedMessageRegistry implements RetainedMessageRegistry 
     }
 
     @Override
-    public void putRetained(String topicName, byte[] payload, MqttQoS qos) {
+    public void putRetained(String topicName, byte[] payload, MqttQoS qos, PublishProperties properties) {
         retainedMessagesByTopic.put(topicName, new RetainedMessage(
                 topicName,
                 payload == null ? null : payload.clone(),
                 qos,
-                true));
+                true,
+                properties));
     }
 
     @Override
@@ -48,7 +50,8 @@ public class InMemoryRetainedMessageRegistry implements RetainedMessageRegistry 
                         retainedMessage.topicName(),
                         retainedMessage.payloadCopy(),
                         retainedMessage.qos(),
-                        retainedMessage.retain()))
+                        retainedMessage.retain(),
+                        retainedMessage.properties()))
                 .toList();
     }
 
@@ -62,6 +65,7 @@ public class InMemoryRetainedMessageRegistry implements RetainedMessageRegistry 
                 retainedMessage.topicName(),
                 retainedMessage.payloadCopy(),
                 retainedMessage.qos(),
-                retainedMessage.retain()));
+                retainedMessage.retain(),
+                retainedMessage.properties()));
     }
 }

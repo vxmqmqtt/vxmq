@@ -14,9 +14,11 @@ import io.github.vxmqmqtt.vxmq.protocol.model.Mqtt5ConnectRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.OutboundPubRecOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishAcknowledgement;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishAcknowledgementType;
+import io.github.vxmqmqtt.vxmq.protocol.model.PublishProperties;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishDelivery;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishReleaseDisposition;
+import io.github.vxmqmqtt.vxmq.protocol.model.PublishUserProperty;
 import io.github.vxmqmqtt.vxmq.protocol.model.RejectedConnectResponse;
 import io.github.vxmqmqtt.vxmq.protocol.model.ReplayPubRel;
 import io.github.vxmqmqtt.vxmq.protocol.model.ReplayPublish;
@@ -48,6 +50,8 @@ import io.vertx.mutiny.core.Vertx;
 import io.vertx.mutiny.mqtt.MqttEndpoint;
 import io.vertx.mutiny.mqtt.MqttServer;
 import jakarta.enterprise.context.ApplicationScoped;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -152,7 +156,8 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                     message.qosLevel().value(),
                     message.isRetain(),
                     message.isDup(),
-                    message.payload() == null ? null : message.payload().getBytes()));
+                    message.payload() == null ? null : message.payload().getBytes(),
+                    publishProperties(connection.protocolVersion(), message.properties())));
 
             if (publishOutcome.disconnectAction().isDisconnect()) {
                 disconnectForInvalidPublish(connection, endpoint, publishOutcome.disconnectAction().reasonCode());
@@ -371,7 +376,8 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
     private Uni<Integer> outboundPublish(MqttEndpoint endpoint, PublishDelivery delivery) {
         Buffer payload = delivery.payload() == null ? Buffer.buffer() : Buffer.buffer(delivery.payloadCopy());
         MqttProperties publishProperties = publishProperties(endpoint.protocolVersion(), delivery);
-        if (!delivery.subscriptionIdentifiers().isEmpty() && endpoint.protocolVersion() == 5) {
+        if (endpoint.protocolVersion() == 5
+                && (!delivery.subscriptionIdentifiers().isEmpty() || !delivery.properties().isEmpty())) {
             return endpoint.publish(
                     delivery.topicName(),
                     payload,
@@ -399,16 +405,32 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
     }
 
     private MqttProperties publishProperties(int protocolVersion, PublishDelivery delivery) {
-        if (protocolVersion != 5 || delivery.subscriptionIdentifiers().isEmpty()) {
+        if (protocolVersion != 5 || (delivery.subscriptionIdentifiers().isEmpty() && delivery.properties().isEmpty())) {
             return MqttProperties.NO_PROPERTIES;
         }
         MqttProperties properties = new MqttProperties();
+        for (PublishUserProperty userProperty : delivery.properties().userProperties()) {
+            properties.add(new MqttProperties.UserProperty(userProperty.key(), userProperty.value()));
+        }
         for (Integer subscriptionIdentifier : delivery.subscriptionIdentifiers()) {
             properties.add(new MqttProperties.IntegerProperty(
                     MqttProperties.MqttPropertyType.SUBSCRIPTION_IDENTIFIER.value(),
                     subscriptionIdentifier));
         }
         return properties;
+    }
+
+    private PublishProperties publishProperties(int protocolVersion, MqttProperties mqttProperties) {
+        if (protocolVersion != 5 || mqttProperties == null) {
+            return PublishProperties.empty();
+        }
+        List<PublishUserProperty> userProperties = new ArrayList<>();
+        for (MqttProperties.MqttProperty<?> property : mqttProperties.getProperties(
+                MqttProperties.MqttPropertyType.USER_PROPERTY.value())) {
+            MqttProperties.StringPair pair = (MqttProperties.StringPair) property.value();
+            userProperties.add(new PublishUserProperty(pair.key, pair.value));
+        }
+        return userProperties.isEmpty() ? PublishProperties.empty() : new PublishProperties(userProperties);
     }
 
     /**

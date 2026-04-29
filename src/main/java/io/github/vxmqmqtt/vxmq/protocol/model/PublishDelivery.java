@@ -15,6 +15,7 @@ public record PublishDelivery(
         boolean duplicate,
         Integer packetId,
         boolean fromOfflineQueue,
+        PublishProperties properties,
         List<Integer> subscriptionIdentifiers) {
 
     public PublishDelivery(
@@ -26,10 +27,44 @@ public record PublishDelivery(
             boolean duplicate,
             Integer packetId,
             boolean fromOfflineQueue) {
-        this(clientId, topicName, payload, grantedQos, retain, duplicate, packetId, fromOfflineQueue, List.of());
+        this(
+                clientId,
+                topicName,
+                payload,
+                grantedQos,
+                retain,
+                duplicate,
+                packetId,
+                fromOfflineQueue,
+                PublishProperties.empty(),
+                List.of());
+    }
+
+    public PublishDelivery(
+            String clientId,
+            String topicName,
+            byte[] payload,
+            MqttQoS grantedQos,
+            boolean retain,
+            boolean duplicate,
+            Integer packetId,
+            boolean fromOfflineQueue,
+            List<Integer> subscriptionIdentifiers) {
+        this(
+                clientId,
+                topicName,
+                payload,
+                grantedQos,
+                retain,
+                duplicate,
+                packetId,
+                fromOfflineQueue,
+                PublishProperties.empty(),
+                subscriptionIdentifiers);
     }
 
     public PublishDelivery {
+        properties = properties == null ? PublishProperties.empty() : properties;
         subscriptionIdentifiers = List.copyOf(subscriptionIdentifiers);
     }
 
