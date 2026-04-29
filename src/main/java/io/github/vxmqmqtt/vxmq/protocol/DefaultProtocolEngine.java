@@ -647,7 +647,8 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 willMessage.qos().value(),
                 willMessage.retain(),
                 false,
-                willMessage.payloadCopy()));
+                willMessage.payloadCopy(),
+                willMessage.properties()));
         return publishResult.deliveryPlan().deliveries();
     }
 }

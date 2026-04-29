@@ -131,11 +131,13 @@ sequenceDiagram
 - 显式 `DISCONNECT` 不触发 will。
 - 网络断开、Keep Alive 超时、协议错误断连和连接接管导致的旧连接关闭都可能触发 will。
 - will 被转换为内部 `PublishRequest`，并复用普通 `PUBLISH` 主链路。
+- MQTT 5 Will Properties 当前会提取 `User Property`，并在 will 触发发布时作为 PUBLISH `User Property` 透传。
 - 因此 will 自动继承：
   - Topic 匹配
   - 在线投递
   - 离线持久会话的 QoS 1 入队
   - `retain=true` 时写入 retained store
+  - `User Property` 在线下发、离线恢复和 retained replay
 - 当前 will QoS 2 尚未纳入实现；will 解析仍将非 QoS 0 映射为 QoS 1。
 
 ## 协议版本差异
@@ -152,5 +154,5 @@ sequenceDiagram
 - 当前支持基础 will 保存、显式断连抑制和异常关闭发布。
 - 当前支持离线 QoS 1 积压与重连恢复。
 - 当前支持 retained QoS 2 存储与重放，但 will QoS 2 延后。
-- 当前支持 Subscription Options、Subscription Identifier 和 PUBLISH User Property。
-- 当前不支持非 PUBLISH 报文 User Property、共享订阅和高级 MQTT 5 will / retain 属性。
+- 当前支持 Subscription Options、Subscription Identifier 和 PUBLISH / Will User Property。
+- 当前不支持 CONNECT / CONNACK / SUBSCRIBE / SUBACK / DISCONNECT 等非发布语义报文的 User Property、共享订阅和除 Will User Property 外的高级 MQTT 5 will / retain 属性。

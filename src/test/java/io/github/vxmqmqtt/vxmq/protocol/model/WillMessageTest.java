@@ -43,4 +43,19 @@ class WillMessageTest {
         assertEquals(MqttQoS.AT_MOST_ONCE, willMessage.qos());
         assertTrue(!willMessage.retain());
     }
+
+    // Verifies that MQTT 5 will user properties are modeled as publish properties.
+    @Test
+    void shouldPreserveWillPublishProperties() {
+        PublishProperties properties = new PublishProperties(
+                java.util.List.of(new PublishUserProperty("trace", "will")));
+        WillMessage willMessage = new WillMessage(
+                "status/last-will",
+                "gone".getBytes(),
+                MqttQoS.AT_MOST_ONCE,
+                false,
+                properties);
+
+        assertEquals(properties, willMessage.properties());
+    }
 }

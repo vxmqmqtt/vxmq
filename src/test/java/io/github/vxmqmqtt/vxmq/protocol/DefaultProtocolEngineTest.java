@@ -1023,6 +1023,62 @@ class DefaultProtocolEngineTest {
         assertTrue(retainedMessageRegistry.findExact("status/publisher-will-abnormal").isPresent());
     }
 
+    // Verifies that will user properties are published through the normal publish delivery path.
+    @Test
+    void shouldPublishWillWithUserPropertiesAfterAbnormalClose() {
+        ClientConnection subscriber = connectClient("subscriber-will-user-properties", 5, true, false, 0L);
+        protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("status/+", 0))));
+        ClientConnection publisher = connectClient(
+                "publisher-will-user-properties",
+                5,
+                false,
+                false,
+                60L,
+                new WillMessage(
+                        "status/publisher-will-user-properties",
+                        "offline".getBytes(),
+                        MqttQoS.AT_MOST_ONCE,
+                        false,
+                        userProperties(new PublishUserProperty("trace", "will"))));
+
+        List<PublishDelivery> deliveries = protocolEngine.handleConnectionClosed(publisher);
+
+        assertEquals(
+                List.of(new PublishUserProperty("trace", "will")),
+                deliveryFor(deliveries, "subscriber-will-user-properties").properties().userProperties());
+    }
+
+    // Verifies that retained will user properties are saved and replayed with the retained message.
+    @Test
+    void shouldReplayRetainedWillWithUserProperties() {
+        ClientConnection publisher = connectClient(
+                "publisher-retained-will-user-properties",
+                5,
+                false,
+                false,
+                60L,
+                new WillMessage(
+                        "status/publisher-retained-will-user-properties",
+                        "offline".getBytes(),
+                        MqttQoS.AT_MOST_ONCE,
+                        true,
+                        userProperties(new PublishUserProperty("trace", "retained-will"))));
+        protocolEngine.handleConnectionClosed(publisher);
+        ClientConnection subscriber = connectClient("subscriber-retained-will-user-properties", 5, true, false, 0L);
+
+        SubscribeOutcome outcome = protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("status/+", 0))));
+
+        assertEquals(
+                List.of(new PublishUserProperty("trace", "retained-will")),
+                deliveryFor(
+                                outcome.retainedReplayPlan().deliveries(),
+                                "subscriber-retained-will-user-properties")
+                        .properties()
+                        .userProperties());
+    }
+
     // Verifies that closing a superseded connection does not accidentally unbind the newer takeover session.
     @Test
     void shouldKeepNewSessionBindingWhenSupersededConnectionCloses() {

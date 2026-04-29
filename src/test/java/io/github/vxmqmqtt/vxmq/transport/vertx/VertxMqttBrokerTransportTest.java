@@ -36,6 +36,7 @@ import io.smallrye.mutiny.Uni;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
+import io.vertx.mqtt.MqttWill;
 import io.vertx.mqtt.messages.MqttPublishMessage;
 import io.vertx.mqtt.messages.MqttSubscribeMessage;
 import io.vertx.mqtt.messages.codes.MqttDisconnectReasonCode;
@@ -361,6 +362,57 @@ class VertxMqttBrokerTransportTest {
         assertNull(probe.publishProperties);
     }
 
+    // Verifies that MQTT 5 CONNECT will properties are mapped onto the broker will model.
+    @Test
+    void shouldMapMqtt5WillUserProperties() throws Exception {
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngineReturning(InboundPublishOutcome.rejected()),
+                new ClientConnectionRegistry(),
+                brokerEventSink());
+        MqttProperties willProperties = new MqttProperties();
+        willProperties.add(new MqttProperties.UserProperty("trace", "will"));
+        willProperties.add(new MqttProperties.UserProperty("source", "connect"));
+        MqttWill will = new MqttWill(
+                true,
+                "status/client-will",
+                Buffer.buffer("offline"),
+                1,
+                true,
+                willProperties);
+
+        ConnectRequest request = buildConnectRequest(transport, new ConnectEndpointProbe(5, will).endpoint());
+
+        assertEquals(
+                List.of(new PublishUserProperty("trace", "will"), new PublishUserProperty("source", "connect")),
+                request.willMessage().properties().userProperties());
+    }
+
+    // Verifies that MQTT 3.1.1 will messages do not create MQTT 5 publish properties.
+    @Test
+    void shouldUseEmptyPropertiesForMqtt311Will() throws Exception {
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngineReturning(InboundPublishOutcome.rejected()),
+                new ClientConnectionRegistry(),
+                brokerEventSink());
+        MqttProperties willProperties = new MqttProperties();
+        willProperties.add(new MqttProperties.UserProperty("trace", "will"));
+        MqttWill will = new MqttWill(
+                true,
+                "status/client-will",
+                Buffer.buffer("offline"),
+                1,
+                true,
+                willProperties);
+
+        ConnectRequest request = buildConnectRequest(transport, new ConnectEndpointProbe(4, will).endpoint());
+
+        assertTrue(request.willMessage().properties().isEmpty());
+    }
+
     private static void installHandlers(
             VertxMqttBrokerTransport transport,
             ClientConnection connection,
@@ -371,6 +423,14 @@ class VertxMqttBrokerTransportTest {
                 MqttEndpoint.class);
         method.setAccessible(true);
         method.invoke(transport, connection, endpoint);
+    }
+
+    private static ConnectRequest buildConnectRequest(
+            VertxMqttBrokerTransport transport,
+            MqttEndpoint endpoint) throws Exception {
+        Method method = VertxMqttBrokerTransport.class.getDeclaredMethod("buildConnectRequest", MqttEndpoint.class);
+        method.setAccessible(true);
+        return (ConnectRequest) method.invoke(transport, endpoint);
     }
 
     @SuppressWarnings("unchecked")
@@ -777,6 +837,42 @@ class VertxMqttBrokerTransportTest {
         @SuppressWarnings("unchecked")
         private static Handler<Integer> castIntegerHandler(Object value) {
             return (Handler<Integer>) value;
+        }
+    }
+
+    /**
+     * Lightweight endpoint double for invoking CONNECT request mapping.
+     */
+    private static final class ConnectEndpointProbe {
+
+        private final MqttEndpoint endpoint;
+        private final int protocolVersion;
+        private final MqttWill will;
+
+        private ConnectEndpointProbe(int protocolVersion, MqttWill will) {
+            this.protocolVersion = protocolVersion;
+            this.will = will;
+            io.vertx.mqtt.MqttEndpoint delegate = (io.vertx.mqtt.MqttEndpoint) Proxy.newProxyInstance(
+                    io.vertx.mqtt.MqttEndpoint.class.getClassLoader(),
+                    new Class<?>[]{io.vertx.mqtt.MqttEndpoint.class},
+                    (proxy, method, args) -> switch (method.getName()) {
+                        case "clientIdentifier" -> "client-will";
+                        case "protocolName" -> "MQTT";
+                        case "protocolVersion" -> this.protocolVersion;
+                        case "isCleanSession" -> true;
+                        case "connectProperties" -> MqttProperties.NO_PROPERTIES;
+                        case "auth" -> null;
+                        case "will" -> this.will;
+                        case "toString" -> "ConnectEndpointProbe";
+                        case "hashCode" -> System.identityHashCode(proxy);
+                        case "equals" -> proxy == args[0];
+                        default -> throw new UnsupportedOperationException("Unsupported method: " + method.getName());
+                    });
+            this.endpoint = new MqttEndpoint(delegate);
+        }
+
+        private MqttEndpoint endpoint() {
+            return endpoint;
         }
     }
 

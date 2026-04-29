@@ -119,6 +119,7 @@ public final class ClientConnection {
                 source.topicName(),
                 source.payloadCopy(),
                 source.qos(),
-                source.retain());
+                source.retain(),
+                source.properties());
     }
 }

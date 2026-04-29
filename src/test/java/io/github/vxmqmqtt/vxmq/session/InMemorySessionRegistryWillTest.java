@@ -4,8 +4,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.github.vxmqmqtt.vxmq.protocol.model.PublishProperties;
+import io.github.vxmqmqtt.vxmq.protocol.model.PublishUserProperty;
 import io.github.vxmqmqtt.vxmq.protocol.model.WillMessage;
 import io.netty.handler.codec.mqtt.MqttQoS;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -73,5 +76,29 @@ class InMemorySessionRegistryWillTest {
 
         assertTrue(sessionRegistry.find("client-will").isPresent());
         assertNull(sessionRegistry.find("client-will").orElseThrow().willMessage());
+    }
+
+    // Verifies that will user properties survive the session registry will snapshot copy.
+    @Test
+    void shouldStoreWillMessageWithUserProperties() {
+        InMemorySessionRegistry sessionRegistry = new InMemorySessionRegistry();
+        PublishProperties properties = new PublishProperties(
+                List.of(new PublishUserProperty("trace", "will")));
+
+        SessionOpenResult openResult = sessionRegistry.openSession(
+                "client-will",
+                new SessionOpenRequest(
+                        true,
+                        true,
+                        60L,
+                        "connection-1",
+                        new WillMessage(
+                                "status/client-will",
+                                "offline".getBytes(),
+                                MqttQoS.AT_LEAST_ONCE,
+                                true,
+                                properties)));
+
+        assertEquals(properties, openResult.session().willMessage().properties());
     }
 }

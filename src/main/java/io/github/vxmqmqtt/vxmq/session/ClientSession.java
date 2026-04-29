@@ -82,7 +82,8 @@ public final class ClientSession {
                 willMessage.topicName(),
                 willMessage.payloadCopy(),
                 willMessage.qos(),
-                willMessage.retain());
+                willMessage.retain(),
+                willMessage.properties());
     }
 
     /**
@@ -415,7 +416,8 @@ public final class ClientSession {
                 source.topicName(),
                 source.payloadCopy(),
                 source.qos(),
-                source.retain());
+                source.retain(),
+                source.properties());
     }
 
     private int allocatePacketId() {

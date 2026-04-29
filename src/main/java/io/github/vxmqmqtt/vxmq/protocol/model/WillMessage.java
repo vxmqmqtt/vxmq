@@ -9,7 +9,16 @@ public record WillMessage(
         String topicName,
         byte[] payload,
         MqttQoS qos,
-        boolean retain) {
+        boolean retain,
+        PublishProperties properties) {
+
+    public WillMessage(String topicName, byte[] payload, MqttQoS qos, boolean retain) {
+        this(topicName, payload, qos, retain, PublishProperties.empty());
+    }
+
+    public WillMessage {
+        properties = properties == null ? PublishProperties.empty() : properties;
+    }
 
     /**
      * Returns a defensive copy of the will payload.

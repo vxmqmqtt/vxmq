@@ -246,7 +246,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                     endpoint.isCleanSession(),
                     username(endpoint.auth()),
                     passwordPresent(endpoint.auth()),
-                    willMessage(endpoint.will()));
+                    willMessage(endpoint.protocolVersion(), endpoint.will()));
         }
         if (endpoint.protocolVersion() == 5) {
             return new Mqtt5ConnectRequest(
@@ -256,7 +256,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                     sessionExpiryIntervalSeconds(endpoint.connectProperties()),
                     username(endpoint.auth()),
                     passwordPresent(endpoint.auth()),
-                    willMessage(endpoint.will()));
+                    willMessage(endpoint.protocolVersion(), endpoint.will()));
         }
 
         return new UnsupportedConnectRequest(
@@ -265,7 +265,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                 endpoint.protocolVersion(),
                 username(endpoint.auth()),
                 passwordPresent(endpoint.auth()),
-                willMessage(endpoint.will()));
+                willMessage(endpoint.protocolVersion(), endpoint.will()));
     }
 
     private void closeSupersededConnection(String connectionId) {
@@ -484,7 +484,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
         return ((Number) property.value()).intValue();
     }
 
-    private WillMessage willMessage(MqttWill will) {
+    private WillMessage willMessage(int protocolVersion, MqttWill will) {
         if (will == null || !will.isWillFlag()) {
             return null;
         }
@@ -494,7 +494,8 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                 will.getWillQos() <= 0
                         ? io.netty.handler.codec.mqtt.MqttQoS.AT_MOST_ONCE
                         : io.netty.handler.codec.mqtt.MqttQoS.AT_LEAST_ONCE,
-                will.isWillRetain());
+                will.isWillRetain(),
+                publishProperties(protocolVersion, will.getWillProperties()));
     }
 
     /**
