@@ -16,6 +16,7 @@ import io.github.vxmqmqtt.vxmq.protocol.model.InboundPublishOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishDelivery;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishProperties;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.MessageExpiry;
 import io.github.vxmqmqtt.vxmq.protocol.model.MqttUserProperty;
 import io.github.vxmqmqtt.vxmq.protocol.model.MqttUserProperties;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishAcknowledgementType;
@@ -50,6 +51,10 @@ import io.vertx.mqtt.messages.codes.MqttDisconnectReasonCode;
 import io.vertx.mqtt.messages.codes.MqttPubAckReasonCode;
 import io.vertx.mqtt.messages.codes.MqttSubAckReasonCode;
 import io.vertx.mqtt.messages.codes.MqttUnsubAckReasonCode;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -66,6 +71,7 @@ class DefaultProtocolEngineTest {
     private RetainedMessageRegistry retainedMessageRegistry;
     private SubscriptionRegistry subscriptionRegistry;
     private DefaultProtocolEngine protocolEngine;
+    private MutableClock clock;
 
     @BeforeEach
     void setUp() {
@@ -74,6 +80,7 @@ class DefaultProtocolEngineTest {
         sessionRegistry = new InMemorySessionRegistry();
         retainedMessageRegistry = new InMemoryRetainedMessageRegistry(mqttTopicSupport);
         subscriptionRegistry = new InMemorySubscriptionRegistry(mqttTopicSupport);
+        clock = new MutableClock(Instant.parse("2026-04-30T00:00:00Z"));
         protocolEngine = new DefaultProtocolEngine(
                 new PermitAllAuthProvider(),
                 sessionRegistry,
@@ -81,7 +88,8 @@ class DefaultProtocolEngineTest {
                 subscriptionRegistry,
                 mqttTopicSupport,
                 new NoOpBrokerEventSink(),
-                connectionRegistry);
+                connectionRegistry,
+                clock);
     }
 
     // Verifies that MQTT 3.1.1 rejects empty client ids when the session is not clean.
@@ -353,6 +361,49 @@ class DefaultProtocolEngineTest {
                 result.deliveryPlan().deliveries().getFirst().properties().userProperties().values());
     }
 
+    // Verifies that expired MQTT 5 publishes are acknowledged but not routed to online subscribers.
+    @Test
+    void shouldDropExpiredOnlinePublishDelivery() {
+        ClientConnection publisher = connectClient("publisher-expired-online", 5, true, false, 0L);
+        ClientConnection subscriber = connectClient("subscriber-expired-online", 5, true, false, 0L);
+        protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 0))));
+
+        InboundPublishOutcome result = protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                0,
+                0,
+                false,
+                false,
+                "payload".getBytes(),
+                messageExpiryAt(clock.instant().minusSeconds(1))));
+
+        assertFalse(result.disconnectAction().isDisconnect());
+        assertTrue(result.deliveryPlan().deliveries().isEmpty());
+        assertEquals(0, result.deliveryPlan().queuedMessageCount());
+    }
+
+    // Verifies that live deliveries preserve the publish expiry snapshot for outbound property writing.
+    @Test
+    void shouldPreserveMessageExpiryForOnlinePublishDelivery() {
+        ClientConnection publisher = connectClient("publisher-expiry-online", 5, true, false, 0L);
+        ClientConnection subscriber = connectClient("subscriber-expiry-online", 5, true, false, 0L);
+        protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 0))));
+        PublishProperties properties = messageExpiryAt(clock.instant().plusSeconds(60));
+
+        InboundPublishOutcome result = protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                0,
+                0,
+                false,
+                false,
+                "payload".getBytes(),
+                properties));
+
+        assertEquals(properties.messageExpiry(), result.deliveryPlan().deliveries().getFirst().properties().messageExpiry());
+    }
+
     // Verifies that MQTT 5 No Local subscriptions do not receive publishes from the same client.
     @Test
     void shouldSkipNoLocalDeliveryForSameClientPublisher() {
@@ -575,6 +626,29 @@ class DefaultProtocolEngineTest {
                 retainedDelivery.properties().userProperties().values());
     }
 
+    // Verifies that expired retained messages are not replayed and are lazily removed.
+    @Test
+    void shouldNotReplayExpiredRetainedMessage() {
+        ClientConnection publisher = connectClient("publisher-retained-expired", 5, true, false, 0L);
+        protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                0,
+                0,
+                true,
+                false,
+                "retained-payload".getBytes(),
+                messageExpiryAt(clock.instant().plusSeconds(5))));
+        assertTrue(retainedMessageRegistry.findExact("sensors/room-1/temperature").isPresent());
+        clock.advanceSeconds(6);
+
+        ClientConnection subscriber = connectClient("subscriber-retained-expired", 5, true, false, 0L);
+        SubscribeOutcome subscribeResult = protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 0))));
+
+        assertTrue(subscribeResult.retainedReplayPlan().deliveries().isEmpty());
+        assertTrue(retainedMessageRegistry.findExact("sensors/room-1/temperature").isEmpty());
+    }
+
     // Verifies that retained publishes use the minimum of retained QoS and granted subscription QoS.
     @Test
     void shouldUseMinimumQosForRetainedReplay() {
@@ -743,6 +817,36 @@ class DefaultProtocolEngineTest {
                 resumedDeliveries.getFirst().properties().userProperties().values());
     }
 
+    // Verifies that expired queued messages are discarded instead of being resumed after reconnect.
+    @Test
+    void shouldDropExpiredQueuedMessageOnReconnect() {
+        ClientConnection publisher = connectClient("publisher-expired-resume", 5, true, false, 0L);
+        ClientConnection firstSubscriberConnection =
+                connectClient("subscriber-expired-resume", 5, false, false, 60L);
+        protocolEngine.handleSubscribe(firstSubscriberConnection, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 1))));
+        closeClientConnection(firstSubscriberConnection);
+
+        protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                23,
+                1,
+                false,
+                false,
+                "payload".getBytes(),
+                messageExpiryAt(clock.instant().plusSeconds(5))));
+        assertEquals(1, sessionRegistry.find("subscriber-expired-resume").orElseThrow().queuedMessageCount());
+        clock.advanceSeconds(6);
+
+        ClientConnection secondSubscriberConnection =
+                connectClient("subscriber-expired-resume", 5, false, false, 60L);
+        SessionResumePlan resumePlan = protocolEngine.handleSessionResume(secondSubscriberConnection);
+
+        assertTrue(resumePlan.actions().isEmpty());
+        assertEquals(0, sessionRegistry.find("subscriber-expired-resume").orElseThrow().queuedMessageCount());
+        assertEquals(0, sessionRegistry.find("subscriber-expired-resume").orElseThrow().inflightMessageCount());
+    }
+
     // Verifies that inbound QoS 2 publish is routed only after PUBREL and duplicate PUBREL does not re-deliver.
     @Test
     void shouldRouteQos2PublishOnlyAfterPubRel() {
@@ -796,6 +900,31 @@ class DefaultProtocolEngineTest {
         assertEquals(
                 List.of(new MqttUserProperty("qos", "2")),
                 pubRelResult.deliveryPlan().deliveries().getFirst().properties().userProperties().values());
+    }
+
+    // Verifies that inbound QoS 2 messages expiring before PUBREL complete without routing.
+    @Test
+    void shouldDropExpiredQos2PublishAfterPubRel() {
+        ClientConnection publisher = connectClient("publisher-qos2-expired", 5, true, false, 0L);
+        ClientConnection subscriber = connectClient("subscriber-qos2-expired", 5, false, false, 60L);
+        protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 2))));
+
+        protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                50,
+                2,
+                false,
+                false,
+                "payload-qos2".getBytes(),
+                messageExpiryAt(clock.instant().plusSeconds(5))));
+        clock.advanceSeconds(6);
+
+        InboundPubRelOutcome pubRelResult = protocolEngine.handlePubRel(publisher, 50);
+
+        assertTrue(pubRelResult.deliveryPlan().isEmpty());
+        assertEquals(0, sessionRegistry.find("publisher-qos2-expired").orElseThrow().inboundQos2MessageCount());
+        assertEquals(0, sessionRegistry.find("subscriber-qos2-expired").orElseThrow().inflightMessageCount());
     }
 
     // Verifies that outbound QoS 2 advances on PUBREC and clears on PUBCOMP.
@@ -1153,6 +1282,10 @@ class DefaultProtocolEngineTest {
         return new PublishProperties(new MqttUserProperties(List.of(userProperties)));
     }
 
+    private PublishProperties messageExpiryAt(Instant expiresAt) {
+        return new PublishProperties(MqttUserProperties.empty(), new MessageExpiry(expiresAt));
+    }
+
     private PublishDelivery deliveryFor(List<PublishDelivery> deliveries, String clientId) {
         return deliveries.stream()
                 .filter(delivery -> clientId.equals(delivery.clientId()))
@@ -1196,6 +1329,34 @@ class DefaultProtocolEngineTest {
 
         @Override
         public void protocolWarning(ClientConnection connection, String message) {
+        }
+    }
+
+    private static final class MutableClock extends Clock {
+
+        private Instant instant;
+
+        private MutableClock(Instant instant) {
+            this.instant = instant;
+        }
+
+        private void advanceSeconds(long seconds) {
+            instant = instant.plusSeconds(seconds);
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return instant;
         }
     }
 }

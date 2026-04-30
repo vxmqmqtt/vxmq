@@ -51,6 +51,7 @@ import io.vertx.mutiny.core.Vertx;
 import io.vertx.mutiny.mqtt.MqttEndpoint;
 import io.vertx.mutiny.mqtt.MqttServer;
 import jakarta.enterprise.context.ApplicationScoped;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -158,7 +159,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                     message.isRetain(),
                     message.isDup(),
                     message.payload() == null ? null : message.payload().getBytes(),
-                    new PublishProperties(userProperties(connection.protocolVersion(), message.properties()))));
+                    publishProperties(connection.protocolVersion(), message.properties())));
 
             if (publishOutcome.disconnectAction().isDisconnect()) {
                 disconnectForInvalidPublish(connection, endpoint, publishOutcome.disconnectAction().reasonCode());
@@ -417,12 +418,24 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
         for (MqttUserProperty userProperty : delivery.properties().userProperties().values()) {
             properties.add(new MqttProperties.UserProperty(userProperty.key(), userProperty.value()));
         }
+        delivery.properties()
+                .messageExpiry()
+                .remainingIntervalSeconds(Instant.now())
+                .ifPresent(remaining -> properties.add(new MqttProperties.IntegerProperty(
+                        MqttProperties.MqttPropertyType.PUBLICATION_EXPIRY_INTERVAL.value(),
+                        (int) remaining)));
         for (Integer subscriptionIdentifier : delivery.subscriptionIdentifiers()) {
             properties.add(new MqttProperties.IntegerProperty(
                     MqttProperties.MqttPropertyType.SUBSCRIPTION_IDENTIFIER.value(),
                     subscriptionIdentifier));
         }
         return properties;
+    }
+
+    private PublishProperties publishProperties(int protocolVersion, MqttProperties mqttProperties) {
+        return new PublishProperties(
+                userProperties(protocolVersion, mqttProperties),
+                messageExpiry(protocolVersion, mqttProperties));
     }
 
     private MqttUserProperties userProperties(int protocolVersion, MqttProperties mqttProperties) {
@@ -436,6 +449,21 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
             userProperties.add(new MqttUserProperty(pair.key, pair.value));
         }
         return userProperties.isEmpty() ? MqttUserProperties.empty() : new MqttUserProperties(userProperties);
+    }
+
+    private io.github.vxmqmqtt.vxmq.protocol.model.MessageExpiry messageExpiry(
+            int protocolVersion,
+            MqttProperties mqttProperties) {
+        if (protocolVersion != 5 || mqttProperties == null) {
+            return io.github.vxmqmqtt.vxmq.protocol.model.MessageExpiry.none();
+        }
+        MqttProperties.MqttProperty<?> property = mqttProperties.getProperty(
+                MqttProperties.MqttPropertyType.PUBLICATION_EXPIRY_INTERVAL.value());
+        if (property == null || property.value() == null) {
+            return io.github.vxmqmqtt.vxmq.protocol.model.MessageExpiry.none();
+        }
+        long intervalSeconds = Integer.toUnsignedLong(((Number) property.value()).intValue());
+        return io.github.vxmqmqtt.vxmq.protocol.model.MessageExpiry.fromIntervalSeconds(intervalSeconds, Instant.now());
     }
 
     /**

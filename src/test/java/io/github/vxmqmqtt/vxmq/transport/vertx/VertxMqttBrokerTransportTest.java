@@ -33,6 +33,7 @@ import org.junit.jupiter.api.Test;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -387,6 +388,41 @@ class VertxMqttBrokerTransportTest {
                 capturedRequest.get().properties().userProperties().values());
     }
 
+    // Verifies that MQTT 5 inbound PUBLISH Message Expiry Interval is passed to the protocol engine.
+    @Test
+    void shouldMapMqtt5PublishMessageExpiryInterval() throws Exception {
+        AtomicReference<PublishRequest> capturedRequest = new AtomicReference<>();
+        ProtocolEngine protocolEngine = protocolEngineCapturingPublish(capturedRequest);
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngine,
+                new ClientConnectionRegistry(),
+                brokerEventSink());
+        ClientConnection connection = connectedClient("client-publish-expiry");
+        EndpointProbe probe = new EndpointProbe(5, true);
+
+        installHandlers(transport, connection, probe.endpoint());
+        probe.invokePublishHandler(new PublishMessageProbe(
+                "sensors/room-1/temperature",
+                7,
+                0,
+                false,
+                false,
+                "payload",
+                messageExpiryInterval(30L)).message());
+
+        assertNotNull(capturedRequest.get());
+        assertFalse(capturedRequest.get().properties().messageExpiry().isEmpty());
+        long remaining = capturedRequest.get()
+                .properties()
+                .messageExpiry()
+                .remainingIntervalSeconds(Instant.now())
+                .orElseThrow();
+        assertTrue(remaining > 0L);
+        assertTrue(remaining <= 30L);
+    }
+
     // Verifies that outbound MQTT 5 publishes include both User Property and Subscription Identifier properties.
     @Test
     void shouldAddUserPropertiesAndSubscriptionIdentifiersToMqtt5PublishProperties() throws Exception {
@@ -415,6 +451,57 @@ class VertxMqttBrokerTransportTest {
         assertNotNull(probe.publishProperties);
         assertEquals(
                 List.of("trace=a", "trace=b"),
+                probe.publishProperties.getProperties(MqttProperties.MqttPropertyType.USER_PROPERTY.value())
+                        .stream()
+                        .map(property -> {
+                            MqttProperties.StringPair pair =
+                                    (MqttProperties.StringPair) property.value();
+                            return pair.key + "=" + pair.value;
+                        })
+                        .toList());
+        assertEquals(
+                List.of(7),
+                probe.publishProperties.getProperties(
+                                MqttProperties.MqttPropertyType.SUBSCRIPTION_IDENTIFIER.value())
+                        .stream()
+                .map(MqttProperties.MqttProperty::value)
+                .toList());
+    }
+
+    // Verifies that MQTT 5 outbound publishes include Message Expiry Interval with other publish properties.
+    @Test
+    void shouldAddMessageExpiryToMqtt5PublishProperties() throws Exception {
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngineReturning(InboundPublishOutcome.rejected()),
+                new ClientConnectionRegistry(),
+                brokerEventSink());
+        EndpointProbe probe = new EndpointProbe(5, true);
+
+        publishToSubscriber(transport, probe.endpoint(), new PublishDelivery(
+                "subscriber-with-expiry",
+                "sensors/room-1/temperature",
+                "payload".getBytes(),
+                MqttQoS.AT_LEAST_ONCE,
+                false,
+                false,
+                12,
+                false,
+                new PublishProperties(
+                        new MqttUserProperties(List.of(new MqttUserProperty("trace", "a"))),
+                        MessageExpiry.fromIntervalSeconds(30L, Instant.now())),
+                List.of(7)));
+
+        assertNotNull(probe.publishProperties);
+        MqttProperties.MqttProperty<?> expiryProperty = probe.publishProperties.getProperty(
+                MqttProperties.MqttPropertyType.PUBLICATION_EXPIRY_INTERVAL.value());
+        assertNotNull(expiryProperty);
+        int remaining = (Integer) expiryProperty.value();
+        assertTrue(remaining > 0);
+        assertTrue(remaining <= 30);
+        assertEquals(
+                List.of("trace=a"),
                 probe.publishProperties.getProperties(MqttProperties.MqttPropertyType.USER_PROPERTY.value())
                         .stream()
                         .map(property -> {
@@ -577,6 +664,12 @@ class VertxMqttBrokerTransportTest {
 
     private static PublishProperties userProperties(MqttUserProperty... userProperties) {
         return new PublishProperties(new MqttUserProperties(List.of(userProperties)));
+    }
+
+    private static PublishProperties messageExpiryInterval(long intervalSeconds) {
+        return new PublishProperties(
+                MqttUserProperties.empty(),
+                MessageExpiry.fromIntervalSeconds(intervalSeconds, Instant.now()));
     }
 
     private static ClientConnection connectedClient(String clientId) {
@@ -1118,6 +1211,11 @@ class VertxMqttBrokerTransportTest {
             for (MqttUserProperty userProperty : publishProperties.userProperties().values()) {
                 mqttProperties.add(new MqttProperties.UserProperty(userProperty.key(), userProperty.value()));
             }
+            publishProperties.messageExpiry()
+                    .remainingIntervalSeconds(Instant.now())
+                    .ifPresent(remaining -> mqttProperties.add(new MqttProperties.IntegerProperty(
+                            MqttProperties.MqttPropertyType.PUBLICATION_EXPIRY_INTERVAL.value(),
+                            (int) remaining)));
             this.message = (MqttPublishMessage) Proxy.newProxyInstance(
                     MqttPublishMessage.class.getClassLoader(),
                     new Class<?>[]{MqttPublishMessage.class},

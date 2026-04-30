@@ -5,6 +5,7 @@ import io.github.vxmqmqtt.vxmq.protocol.model.PublishProperties;
 import io.github.vxmqmqtt.vxmq.routing.SubscriptionBinding;
 import io.netty.handler.codec.mqtt.MqttQoS;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -54,6 +55,13 @@ public interface SessionRegistry {
      * Converts all queued offline messages into inflight deliveries after reconnect.
      */
     List<InflightMessage> drainQueuedMessages(String clientId);
+
+    /**
+     * Converts all non-expired queued offline messages into inflight deliveries after reconnect.
+     */
+    default List<InflightMessage> drainQueuedMessages(String clientId, Instant now) {
+        return drainQueuedMessages(clientId);
+    }
 
     /**
      * Creates one inflight delivery for an online QoS 1 publish.

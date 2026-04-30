@@ -57,6 +57,8 @@ import io.vertx.mqtt.messages.codes.MqttPubRelReasonCode;
 import io.vertx.mqtt.messages.codes.MqttSubAckReasonCode;
 import io.vertx.mqtt.messages.codes.MqttUnsubAckReasonCode;
 import jakarta.enterprise.context.ApplicationScoped;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -74,6 +76,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     private final MqttTopicSupport mqttTopicSupport;
     private final BrokerEventSink brokerEventSink;
     private final ClientConnectionRegistry connectionRegistry;
+    private final Clock clock;
 
     public DefaultProtocolEngine(
             AuthProvider authProvider,
@@ -83,6 +86,26 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             MqttTopicSupport mqttTopicSupport,
             BrokerEventSink brokerEventSink,
             ClientConnectionRegistry connectionRegistry) {
+        this(
+                authProvider,
+                sessionRegistry,
+                retainedMessageRegistry,
+                subscriptionRegistry,
+                mqttTopicSupport,
+                brokerEventSink,
+                connectionRegistry,
+                Clock.systemUTC());
+    }
+
+    public DefaultProtocolEngine(
+            AuthProvider authProvider,
+            SessionRegistry sessionRegistry,
+            RetainedMessageRegistry retainedMessageRegistry,
+            SubscriptionRegistry subscriptionRegistry,
+            MqttTopicSupport mqttTopicSupport,
+            BrokerEventSink brokerEventSink,
+            ClientConnectionRegistry connectionRegistry,
+            Clock clock) {
         this.authProvider = authProvider;
         this.sessionRegistry = sessionRegistry;
         this.retainedMessageRegistry = retainedMessageRegistry;
@@ -90,6 +113,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         this.mqttTopicSupport = mqttTopicSupport;
         this.brokerEventSink = brokerEventSink;
         this.connectionRegistry = connectionRegistry;
+        this.clock = clock == null ? Clock.systemUTC() : clock;
     }
 
     @Override
@@ -257,7 +281,12 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     }
 
     private PublishRoutingResult routePublish(ClientConnection connection, PublishRequest request) {
-        updateRetainedMessageIfRequested(request);
+        Instant now = clock.instant();
+        updateRetainedMessageIfRequested(request, now);
+        if (request.properties().messageExpiry().isExpired(now)) {
+            brokerEventSink.messageRouted(connection, request.topicName(), 0);
+            return new PublishRoutingResult(List.of(), 0);
+        }
 
         List<PublishDelivery> deliveries = new ArrayList<>();
         int queuedMessageCount = 0;
@@ -331,7 +360,8 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             return SessionResumePlan.empty();
         }
 
-        List<InflightMessage> drainedMessages = sessionRegistry.drainQueuedMessages(connection.effectiveClientId());
+        Instant now = clock.instant();
+        List<InflightMessage> drainedMessages = sessionRegistry.drainQueuedMessages(connection.effectiveClientId(), now);
         List<Integer> drainedPacketIds = drainedMessages.stream()
                 .map(InflightMessage::packetId)
                 .toList();
@@ -344,6 +374,8 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             }
             if (inflightMessage.qos2State() == OutboundQos2State.PUBREL_SENT) {
                 actions.add(new ReplayPubRel(inflightMessage.packetId()));
+            } else if (inflightMessage.properties().messageExpiry().isExpired(now)) {
+                sessionRegistry.completeOutboundQos2(connection.effectiveClientId(), inflightMessage.packetId());
             } else {
                 actions.add(new ReplayPublish(toPublishDelivery(connection.effectiveClientId(), inflightMessage)));
             }
@@ -536,12 +568,17 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         return value == 1 ? MqttQoS.AT_LEAST_ONCE : MqttQoS.EXACTLY_ONCE;
     }
 
-    private void updateRetainedMessageIfRequested(PublishRequest request) {
+    private void updateRetainedMessageIfRequested(PublishRequest request, Instant now) {
         if (!request.retain()) {
             return;
         }
 
         if (request.payloadSize() == 0) {
+            retainedMessageRegistry.removeRetained(request.topicName());
+            return;
+        }
+
+        if (request.properties().messageExpiry().isExpired(now)) {
             retainedMessageRegistry.removeRetained(request.topicName());
             return;
         }
@@ -563,7 +600,12 @@ public class DefaultProtocolEngine implements ProtocolEngine {
 
     private List<PublishDelivery> buildRetainedDeliveries(SubscriptionBinding subscriptionBinding) {
         List<PublishDelivery> deliveries = new ArrayList<>();
+        Instant now = clock.instant();
         for (RetainedMessage retainedMessage : retainedMessageRegistry.findMatching(subscriptionBinding.topicFilter())) {
+            if (retainedMessage.properties().messageExpiry().isExpired(now)) {
+                retainedMessageRegistry.removeRetained(retainedMessage.topicName());
+                continue;
+            }
             MqttQoS deliveryQos = grantedDeliveryQos(retainedMessage.qos().value(), subscriptionBinding.grantedQos());
             if (deliveryQos == MqttQoS.AT_MOST_ONCE) {
                 deliveries.add(new PublishDelivery(

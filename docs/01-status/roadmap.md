@@ -72,7 +72,7 @@
 | M3-02 | Subscription Options（No Local / Retain As Published / Retain Handling） | 已完成 | 订阅存储与投递行为符合 MQTT 5 语义；保留消息下发行为与选项联动；测试覆盖主要组合 |
 | M3-03 | Subscription Identifier | 已完成 | 订阅时可绑定标识并在下发中体现；去重与多订阅场景行为清晰；测试覆盖 |
 | M3-04 | User Property 透传 | 已完成 | 入站/出站链路属性透传行为明确；不支持场景有显式限制；测试覆盖 |
-| M3-05 | Message Expiry Interval | 未开始 | 消息过期语义落到在线/离线投递路径；过期后不再下发；测试覆盖 |
+| M3-05 | Message Expiry Interval | 已完成 | 消息过期语义落到在线/离线投递路径；过期后不再下发；测试覆盖 |
 | M3-06 | Receive Maximum | 未开始 | 入站/出站流控边界可配置；超限行为明确；测试覆盖 |
 | M3-07 | Maximum Packet Size | 未开始 | 包大小限制在连接协商与收发链路生效；超限行为明确；测试覆盖 |
 | M3-08 | Response Topic / Correlation Data | 未开始 | 属性透传与可见性验证完成；文档补充请求-响应场景限制 |

@@ -42,7 +42,7 @@ sequenceDiagram
 - `retain`
 - `dup`
 - `payload`
-- MQTT 5 PUBLISH properties：当前支持 `User Property`
+- MQTT 5 PUBLISH properties：当前支持 `User Property` 和 `Message Expiry Interval`
 
 ### 处理流程
 
@@ -66,6 +66,9 @@ sequenceDiagram
 - MQTT 5 `Subscription Identifier` 会随在线、离线恢复和 retained replay 投递下发；同一客户端多个命中订阅会合并到同一出站 PUBLISH 的多个 identifier 属性。
 - MQTT 5 PUBLISH `User Property` 会按入站顺序透传；重复 key 不会合并或去重。
 - `User Property` 会随在线投递、离线恢复、retained replay 和 QoS 2 延迟路由保留。
+- MQTT 5 PUBLISH `Message Expiry Interval` 会在 Broker 接收 PUBLISH 时转换为内部过期时间。
+- 已过期消息不会在线投递、离线入队或 retained replay；QoS 1 / QoS 2 协议确认仍按对应状态机完成。
+- 出站 MQTT 5 PUBLISH 会写回剩余 `Message Expiry Interval`，并可与 `User Property`、`Subscription Identifier` 同时存在。
 
 ## 订阅路径
 
@@ -111,6 +114,7 @@ sequenceDiagram
 - 当前 Broker 接受入站 QoS 2，并按 `PUBLISH -> PUBREC -> PUBREL -> PUBCOMP` 完成 exactly-once 状态机。
 - 入站 QoS 2 的 `PUBLISH` 会先保存事务并返回 `PUBREC`，不会立即路由。
 - 收到对应 `PUBREL` 后，Broker 才执行 retained 更新、订阅匹配和实际投递，并返回 `PUBCOMP`。
+- 若 QoS 2 入站 PUBLISH 在 `PUBREL` 前过期，Broker 仍完成 `PUBCOMP`，但不执行 retained 写入或订阅投递。
 - 重复 `PUBLISH(QoS2)` 会复用已保存事务并再次返回 `PUBREC`，不会重复保存 payload。
 - 重复或未知 `PUBREL` 会返回 `PUBCOMP`，但不会重复投递。
 - 在线 QoS 2 出站消息会进入目标会话 inflight 状态；订阅端 `PUBREC` 后 Broker 发送 `PUBREL`，订阅端 `PUBCOMP` 后清理 inflight。
@@ -124,6 +128,7 @@ sequenceDiagram
 - `retain=true` 且 payload 为空时，删除该 Topic Name 的 retained 记录。
 - retained 发布本身仍继续走普通在线投递或离线 QoS 1 / QoS 2 入队路径。
 - 订阅成功后，命中的 retained 消息会在 SUBACK 之后立即下发。
+- 带 `Message Expiry Interval` 的 retained 消息过期后不会下发；当前在 retained replay 路径做懒删除，不引入后台清理任务。
 - MQTT 5 `Retain Handling` 已支持 `SEND_AT_SUBSCRIBE`、`SEND_AT_SUBSCRIBE_IF_NOT_YET_EXISTS` 和 `DONT_SEND_AT_SUBSCRIBE`。
 - MQTT 5 `Retain Available` 当前未实现。
 
@@ -134,6 +139,7 @@ sequenceDiagram
 - 网络断开、Keep Alive 超时、协议错误断连和连接接管导致的旧连接关闭都可能触发 will。
 - will 被转换为内部 `PublishRequest`，并复用普通 `PUBLISH` 主链路。
 - MQTT 5 Will Properties 当前会提取 `User Property`，并在 will 触发发布时作为 PUBLISH `User Property` 透传。
+- MQTT 5 Will Message Expiry Interval 当前未实现；will 不会在 CONNECT 时启动消息过期倒计时。
 - 因此 will 自动继承：
   - Topic 匹配
   - 在线投递
@@ -147,6 +153,7 @@ sequenceDiagram
 - MQTT 3.1.1 与 MQTT 5 的发布订阅主链路基本一致。
 - MQTT 5 在当前实现中会返回显式 reason code 或 `PUBACK(Success)`；MQTT 3.1.1 使用基础返回报文或直接关闭连接。
 - MQTT 5 出站 PUBLISH 会携带当前支持的 properties；MQTT 3.1.1 出站路径不会写 MQTT 5 properties。
+- MQTT 3.1.1 不解析也不写 `Message Expiry Interval`。
 - 差异主要体现在异常断连、reason code 表达和 MQTT 5 属性，而不是基础投递主流程。
 
 ## 当前实现边界
@@ -156,5 +163,5 @@ sequenceDiagram
 - 当前支持基础 will 保存、显式断连抑制和异常关闭发布。
 - 当前支持离线 QoS 1 积压与重连恢复。
 - 当前支持 retained QoS 2 存储与重放，但 will QoS 2 延后。
-- 当前支持 Subscription Options、Subscription Identifier、CONNECT / SUBSCRIBE / UNSUBSCRIBE request properties 建模和 PUBLISH / Will User Property 透传。
-- 当前不支持 CONNACK / SUBACK / UNSUBACK / DISCONNECT 等出站或非入站 request 的 User Property、共享订阅和除 Will User Property 外的高级 MQTT 5 will / retain 属性。
+- 当前支持 Subscription Options、Subscription Identifier、CONNECT / SUBSCRIBE / UNSUBSCRIBE request properties 建模、PUBLISH / Will User Property 透传和 PUBLISH Message Expiry Interval。
+- 当前不支持 CONNACK / SUBACK / UNSUBACK / DISCONNECT 等出站或非入站 request 的 User Property、共享订阅、Will Message Expiry 和除 Will User Property 外的高级 MQTT 5 will / retain 属性。

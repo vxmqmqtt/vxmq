@@ -253,9 +253,19 @@ public final class ClientSession {
      * Drains queued offline messages into inflight deliveries in FIFO order.
      */
     public synchronized List<InflightMessage> drainQueuedMessagesToInflight() {
+        return drainQueuedMessagesToInflight(null);
+    }
+
+    /**
+     * Drains non-expired queued offline messages into inflight deliveries in FIFO order.
+     */
+    public synchronized List<InflightMessage> drainQueuedMessagesToInflight(Instant now) {
         List<InflightMessage> drained = new ArrayList<>();
         while (!queuedMessages.isEmpty()) {
             QueuedMessage queuedMessage = queuedMessages.pollFirst();
+            if (now != null && queuedMessage.properties().messageExpiry().isExpired(now)) {
+                continue;
+            }
             drained.add(createInflightMessage(
                     queuedMessage.topicName(),
                     queuedMessage.payloadCopy(),

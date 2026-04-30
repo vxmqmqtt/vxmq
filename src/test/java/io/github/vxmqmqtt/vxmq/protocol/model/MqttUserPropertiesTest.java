@@ -2,8 +2,10 @@ package io.github.vxmqmqtt.vxmq.protocol.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -58,6 +60,21 @@ class MqttUserPropertiesTest {
         assertEquals(userProperties, new PublishProperties(userProperties).userProperties());
     }
 
+    // Verifies that publish properties can carry a broker-side message expiry deadline.
+    @Test
+    void shouldExposePublishMessageExpiry() {
+        Instant receivedAt = Instant.parse("2026-04-30T00:00:00Z");
+        MessageExpiry expiry = MessageExpiry.fromIntervalSeconds(60L, receivedAt);
+
+        PublishProperties properties = new PublishProperties(MqttUserProperties.empty(), expiry);
+
+        assertEquals(expiry, properties.messageExpiry());
+        assertFalse(properties.isEmpty());
+        assertFalse(expiry.isExpired(receivedAt.plusSeconds(59)));
+        assertTrue(expiry.isExpired(receivedAt.plusSeconds(60)));
+        assertEquals(1L, expiry.remainingIntervalSeconds(receivedAt.plusSeconds(59)).orElseThrow());
+    }
+
     // Verifies that packet-level property containers normalize nulls to empty properties.
     @Test
     void shouldNormalizeNullPacketProperties() {
@@ -65,5 +82,7 @@ class MqttUserPropertiesTest {
         assertTrue(new SubscriptionProperties(null).isEmpty());
         assertTrue(new UnsubscribeProperties(null).isEmpty());
         assertTrue(new PublishProperties(null).isEmpty());
+        assertTrue(new PublishProperties(null, null).isEmpty());
+        assertTrue(MessageExpiry.none().isEmpty());
     }
 }

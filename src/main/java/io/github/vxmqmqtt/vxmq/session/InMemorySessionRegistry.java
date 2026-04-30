@@ -140,6 +140,13 @@ public class InMemorySessionRegistry implements SessionRegistry {
     }
 
     @Override
+    public List<InflightMessage> drainQueuedMessages(String clientId, Instant now) {
+        return find(clientId)
+                .map(session -> session.drainQueuedMessagesToInflight(now))
+                .orElseGet(List::of);
+    }
+
+    @Override
     public Optional<InflightMessage> createInflightMessage(
             String clientId,
             String topicName,
