@@ -190,9 +190,10 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                     item.retainAsPublished(),
                     item.retainHandling(),
                     item.subscriptionIdentifier());
-            boolean subscriptionAlreadyExisted = sessionRegistry.find(connection.effectiveClientId())
-                    .map(session -> session.subscription(topicFilter) != null)
-                    .orElse(false);
+            SubscriptionBinding previousSubscription = sessionRegistry.find(connection.effectiveClientId())
+                    .map(session -> session.subscription(topicFilter))
+                    .orElse(null);
+            boolean subscriptionAlreadyExisted = previousSubscription != null;
             try {
                 sessionRegistry.addSubscription(subscriptionBinding);
                 subscriptionRegistry.addSubscription(subscriptionBinding);
@@ -202,8 +203,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                     retainedDeliveries.addAll(buildRetainedDeliveries(subscriptionBinding));
                 }
             } catch (RuntimeException exception) {
-                // Roll back the session view if the routing registry write fails.
-                sessionRegistry.removeSubscription(connection.effectiveClientId(), topicFilter);
+                restoreSessionSubscription(connection.effectiveClientId(), topicFilter, previousSubscription);
                 brokerEventSink.protocolWarning(connection, "Failed to register subscription: " + topicFilter);
                 results.add(SubscriptionItemResult.rejected(topicFilter, MqttSubAckReasonCode.UNSPECIFIED_ERROR));
             }
@@ -225,9 +225,13 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 continue;
             }
 
+            SubscriptionBinding previousSubscription = sessionRegistry.find(connection.effectiveClientId())
+                    .map(session -> session.subscription(topicFilter))
+                    .orElse(null);
+            boolean removedFromSession = false;
             try {
                 // Both registries are cleaned up so MQTT 5 can report whether anything existed.
-                boolean removedFromSession = sessionRegistry.removeSubscription(connection.effectiveClientId(), topicFilter);
+                removedFromSession = sessionRegistry.removeSubscription(connection.effectiveClientId(), topicFilter);
                 boolean removedFromRouting = subscriptionRegistry.removeSubscription(connection.effectiveClientId(), topicFilter);
                 if (removedFromSession || removedFromRouting) {
                     brokerEventSink.subscriptionRemoved(connection, topicFilter);
@@ -236,6 +240,9 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                     results.add(UnsubscribeItemResult.noSubscriptionExisted(topicFilter));
                 }
             } catch (RuntimeException exception) {
+                if (removedFromSession && previousSubscription != null) {
+                    sessionRegistry.addSubscription(previousSubscription);
+                }
                 brokerEventSink.protocolWarning(connection, "Failed to remove subscription: " + topicFilter);
                 results.add(UnsubscribeItemResult.rejected(topicFilter, MqttUnsubAckReasonCode.UNSPECIFIED_ERROR));
             }
@@ -675,6 +682,17 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         for (String topicFilter : clearedSession.subscriptions()) {
             subscriptionRegistry.removeSubscription(clearedSession.clientId(), topicFilter);
         }
+    }
+
+    private void restoreSessionSubscription(
+            String clientId,
+            String topicFilter,
+            SubscriptionBinding previousSubscription) {
+        if (previousSubscription == null) {
+            sessionRegistry.removeSubscription(clientId, topicFilter);
+            return;
+        }
+        sessionRegistry.addSubscription(previousSubscription);
     }
 
     private boolean shouldPublishWill(ClientConnection connection) {

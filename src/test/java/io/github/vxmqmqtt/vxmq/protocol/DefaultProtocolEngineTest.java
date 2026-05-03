@@ -37,6 +37,7 @@ import io.github.vxmqmqtt.vxmq.retained.InMemoryRetainedMessageRegistry;
 import io.github.vxmqmqtt.vxmq.retained.RetainedMessageRegistry;
 import io.github.vxmqmqtt.vxmq.routing.DefaultMqttTopicSupport;
 import io.github.vxmqmqtt.vxmq.routing.InMemorySubscriptionRegistry;
+import io.github.vxmqmqtt.vxmq.routing.SubscriptionBinding;
 import io.github.vxmqmqtt.vxmq.routing.SubscriptionRegistry;
 import io.github.vxmqmqtt.vxmq.session.InMemorySessionRegistry;
 import io.github.vxmqmqtt.vxmq.session.SessionRegistry;
@@ -55,6 +56,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -70,12 +72,13 @@ class DefaultProtocolEngineTest {
     private SessionRegistry sessionRegistry;
     private RetainedMessageRegistry retainedMessageRegistry;
     private SubscriptionRegistry subscriptionRegistry;
+    private DefaultMqttTopicSupport mqttTopicSupport;
     private DefaultProtocolEngine protocolEngine;
     private MutableClock clock;
 
     @BeforeEach
     void setUp() {
-        DefaultMqttTopicSupport mqttTopicSupport = new DefaultMqttTopicSupport();
+        mqttTopicSupport = new DefaultMqttTopicSupport();
         connectionRegistry = new ClientConnectionRegistry();
         sessionRegistry = new InMemorySessionRegistry();
         retainedMessageRegistry = new InMemoryRetainedMessageRegistry(mqttTopicSupport);
@@ -273,6 +276,46 @@ class DefaultProtocolEngineTest {
         assertTrue(sessionRegistry.find("client-invalid-sub").orElseThrow().subscriptions().isEmpty());
     }
 
+    // Verifies that a failed routing write for a new subscription does not leave session-only state behind.
+    @Test
+    void shouldRollbackNewSessionSubscriptionWhenRoutingAddFails() {
+        ClientConnection connection = connectClient("client-sub-add-failure", 5, true, false, 0L);
+        protocolEngine = protocolEngineWith(new FailingSubscriptionRegistry(subscriptionRegistry, true, false));
+
+        SubscribeOutcome result = protocolEngine.handleSubscribe(connection, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 1))));
+
+        assertEquals(MqttSubAckReasonCode.UNSPECIFIED_ERROR, result.ack().itemResults().getFirst().reasonCode());
+        assertNull(sessionRegistry.find("client-sub-add-failure").orElseThrow().subscription("sensors/+/temperature"));
+    }
+
+    // Verifies that a failed routing write while replacing a subscription restores the original session binding.
+    @Test
+    void shouldRestorePreviousSessionSubscriptionWhenRoutingReplacementFails() {
+        ClientConnection connection = connectClient("client-sub-replace-failure", 5, true, false, 0L);
+        protocolEngine.handleSubscribe(connection, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 0))));
+        SubscriptionBinding original = sessionRegistry.find("client-sub-replace-failure")
+                .orElseThrow()
+                .subscription("sensors/+/temperature");
+        protocolEngine = protocolEngineWith(new FailingSubscriptionRegistry(subscriptionRegistry, true, false));
+
+        SubscribeOutcome result = protocolEngine.handleSubscribe(connection, new SubscriptionRequest(List.of(
+                new SubscriptionItem(
+                        "sensors/+/temperature",
+                        2,
+                        true,
+                        true,
+                        RetainedHandlingPolicy.DONT_SEND_AT_SUBSCRIBE,
+                        42))));
+
+        SubscriptionBinding restored = sessionRegistry.find("client-sub-replace-failure")
+                .orElseThrow()
+                .subscription("sensors/+/temperature");
+        assertEquals(MqttSubAckReasonCode.UNSPECIFIED_ERROR, result.ack().itemResults().getFirst().reasonCode());
+        assertEquals(original, restored);
+    }
+
     // Verifies that unsubscribe removes state from both the session registry and routing registry.
     @Test
     void shouldRemoveExistingSubscriptionOnUnsubscribe() {
@@ -299,6 +342,26 @@ class DefaultProtocolEngineTest {
 
         assertEquals(1, result.itemResults().size());
         assertEquals(MqttUnsubAckReasonCode.NO_SUBSCRIPTION_EXISTED, result.itemResults().getFirst().reasonCode());
+    }
+
+    // Verifies that a failed routing delete restores the session subscription so both views can be retried.
+    @Test
+    void shouldRestoreSessionSubscriptionWhenRoutingRemoveFails() {
+        ClientConnection connection = connectClient("client-unsub-remove-failure", 5, true, false, 0L);
+        protocolEngine.handleSubscribe(connection, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 1))));
+        SubscriptionBinding original = sessionRegistry.find("client-unsub-remove-failure")
+                .orElseThrow()
+                .subscription("sensors/+/temperature");
+        protocolEngine = protocolEngineWith(new FailingSubscriptionRegistry(subscriptionRegistry, false, true));
+
+        UnsubscribeAck result = protocolEngine.handleUnsubscribe(connection, new UnsubscribeRequest(List.of(
+                "sensors/+/temperature")));
+
+        assertEquals(MqttUnsubAckReasonCode.UNSPECIFIED_ERROR, result.itemResults().getFirst().reasonCode());
+        assertEquals(original, sessionRegistry.find("client-unsub-remove-failure")
+                .orElseThrow()
+                .subscription("sensors/+/temperature"));
     }
 
     // Verifies that invalid filters are rejected during unsubscribe as well.
@@ -1342,6 +1405,18 @@ class DefaultProtocolEngineTest {
         return new PublishProperties(MqttUserProperties.empty(), new MessageExpiry(expiresAt));
     }
 
+    private DefaultProtocolEngine protocolEngineWith(SubscriptionRegistry subscriptionRegistry) {
+        return new DefaultProtocolEngine(
+                new PermitAllAuthProvider(),
+                sessionRegistry,
+                retainedMessageRegistry,
+                subscriptionRegistry,
+                mqttTopicSupport,
+                new NoOpBrokerEventSink(),
+                connectionRegistry,
+                clock);
+    }
+
     private PublishDelivery deliveryFor(List<PublishDelivery> deliveries, String clientId) {
         return deliveries.stream()
                 .filter(delivery -> clientId.equals(delivery.clientId()))
@@ -1385,6 +1460,40 @@ class DefaultProtocolEngineTest {
 
         @Override
         public void protocolWarning(ClientConnection connection, String message) {
+        }
+    }
+
+    private static final class FailingSubscriptionRegistry implements SubscriptionRegistry {
+
+        private final SubscriptionRegistry delegate;
+        private final boolean failAdd;
+        private final boolean failRemove;
+
+        private FailingSubscriptionRegistry(SubscriptionRegistry delegate, boolean failAdd, boolean failRemove) {
+            this.delegate = delegate;
+            this.failAdd = failAdd;
+            this.failRemove = failRemove;
+        }
+
+        @Override
+        public void addSubscription(SubscriptionBinding subscriptionBinding) {
+            if (failAdd) {
+                throw new IllegalStateException("simulated routing add failure");
+            }
+            delegate.addSubscription(subscriptionBinding);
+        }
+
+        @Override
+        public boolean removeSubscription(String clientId, String topicFilter) {
+            if (failRemove) {
+                throw new IllegalStateException("simulated routing remove failure");
+            }
+            return delegate.removeSubscription(clientId, topicFilter);
+        }
+
+        @Override
+        public Collection<SubscriptionBinding> match(String topicName) {
+            return delegate.match(topicName);
         }
     }
 
