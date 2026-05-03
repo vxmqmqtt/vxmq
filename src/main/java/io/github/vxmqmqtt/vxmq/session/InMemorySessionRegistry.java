@@ -23,9 +23,10 @@ public class InMemorySessionRegistry implements SessionRegistry {
     static final int DEFAULT_OFFLINE_QUEUE_CAPACITY = 1_024;
 
     private final Map<String, ClientSession> sessions = new ConcurrentHashMap<>();
-    private volatile int offlineQueueCapacity = DEFAULT_OFFLINE_QUEUE_CAPACITY;
+    private final int offlineQueueCapacity;
 
     public InMemorySessionRegistry() {
+        this(DEFAULT_OFFLINE_QUEUE_CAPACITY);
     }
 
     public InMemorySessionRegistry(int offlineQueueCapacity) {
@@ -36,8 +37,8 @@ public class InMemorySessionRegistry implements SessionRegistry {
      * Applies runtime configuration when the registry is managed by CDI, while keeping plain tests lightweight.
      */
     @Inject
-    void configure(BrokerRuntimeConfig brokerRuntimeConfig) {
-        this.offlineQueueCapacity = brokerRuntimeConfig.offlineQueueCapacityPerSession();
+    public InMemorySessionRegistry(BrokerRuntimeConfig brokerRuntimeConfig) {
+        this(brokerRuntimeConfig.offlineQueueCapacityPerSession());
     }
 
     @Override

@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.github.vxmqmqtt.vxmq.config.BrokerRuntimeConfig;
 import io.netty.handler.codec.mqtt.MqttQoS;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
@@ -112,7 +111,7 @@ class InMemorySessionRegistryTest {
     // Verifies that the registry drops the oldest offline message when the queue capacity is exceeded.
     @Test
     void shouldDropOldestOfflineMessageWhenQueueIsFull() {
-        sessionRegistry.configure(new TestBrokerRuntimeConfig(2));
+        sessionRegistry = new InMemorySessionRegistry(2);
         sessionRegistry.openSession(
                 "offline-client",
                 new SessionOpenRequest(false, true, null, "connection-1", null));
@@ -271,33 +270,5 @@ class InMemorySessionRegistryTest {
         assertEquals(0, session.inflightMessageCount());
         assertEquals(1, session.queuedMessageCount());
         assertTrue(session.queuedMessages().getFirst().duplicate());
-    }
-
-    private record TestBrokerRuntimeConfig(int offlineQueueCapacityPerSession) implements BrokerRuntimeConfig {
-
-        @Override
-        public boolean enabled() {
-            return true;
-        }
-
-        @Override
-        public String host() {
-            return "127.0.0.1";
-        }
-
-        @Override
-        public int port() {
-            return 1883;
-        }
-
-        @Override
-        public int maxMessageSize() {
-            return 268435455;
-        }
-
-        @Override
-        public int timeoutOnConnectSeconds() {
-            return 10;
-        }
     }
 }
