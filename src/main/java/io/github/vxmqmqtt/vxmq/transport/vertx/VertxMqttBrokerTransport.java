@@ -283,17 +283,36 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
 
     private void sendPublishToSubscriber(PublishDelivery delivery) {
         // Re-resolve the active connection to avoid publishing to a client that has been taken over.
-        connectionRegistry.findActiveConnectionId(delivery.clientId())
-                .map(endpointsByConnectionId::get)
-                .ifPresent(endpoint ->
-                        outboundPublish(endpoint, delivery)
-                                .subscribe()
-                                .with(
-                                        ignored -> {
-                                        },
-                                        failure -> brokerEventSink.protocolWarning(null,
-                                                "Failed to publish to subscriber clientId=%s: %s"
-                                                        .formatted(delivery.clientId(), failure.getMessage()))));
+        String activeConnectionId = connectionRegistry.findActiveConnectionId(delivery.clientId()).orElse(null);
+        if (activeConnectionId == null) {
+            brokerEventSink.protocolWarning(null,
+                    "Skipped publish to subscriber clientId=%s: no active connection"
+                            .formatted(delivery.clientId()));
+            return;
+        }
+
+        MqttEndpoint endpoint = endpointsByConnectionId.get(activeConnectionId);
+        if (endpoint == null) {
+            brokerEventSink.protocolWarning(null,
+                    "Skipped publish to subscriber clientId=%s connectionId=%s: endpoint is not registered"
+                            .formatted(delivery.clientId(), activeConnectionId));
+            return;
+        }
+        if (!endpoint.isConnected()) {
+            brokerEventSink.protocolWarning(null,
+                    "Skipped publish to subscriber clientId=%s connectionId=%s: endpoint is not connected"
+                            .formatted(delivery.clientId(), activeConnectionId));
+            return;
+        }
+
+        outboundPublish(endpoint, delivery)
+                .subscribe()
+                .with(
+                        ignored -> {
+                        },
+                        failure -> brokerEventSink.protocolWarning(null,
+                                "Failed to publish to subscriber clientId=%s connectionId=%s: %s"
+                                        .formatted(delivery.clientId(), activeConnectionId, failure.getMessage())));
     }
 
     private void sendSessionResume(SessionResumePlan resumePlan, MqttEndpoint endpoint) {

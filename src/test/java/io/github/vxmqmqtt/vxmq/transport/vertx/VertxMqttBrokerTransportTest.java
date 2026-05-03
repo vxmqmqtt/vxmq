@@ -356,6 +356,35 @@ class VertxMqttBrokerTransportTest {
                         .toList());
     }
 
+    // Verifies that active client mappings without a transport endpoint are observable instead of silently skipped.
+    @Test
+    void shouldWarnWhenActiveSubscriberEndpointIsMissing() throws Exception {
+        ClientConnectionRegistry connectionRegistry = new ClientConnectionRegistry();
+        ClientConnection connection = connectionRegistry.open("127.0.0.1", "subscriber-missing-endpoint", "MQTT", 5, true);
+        connectionRegistry.bindClientId("subscriber-missing-endpoint", connection.connectionId());
+        AtomicReference<String> warning = new AtomicReference<>();
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngineReturning(InboundPublishOutcome.rejected()),
+                connectionRegistry,
+                brokerEventSinkCapturingWarning(warning));
+
+        sendPublishToSubscriber(transport, new PublishDelivery(
+                "subscriber-missing-endpoint",
+                "sensors/room-1/temperature",
+                "payload".getBytes(),
+                MqttQoS.AT_MOST_ONCE,
+                false,
+                false,
+                null,
+                false));
+
+        assertNotNull(warning.get());
+        assertTrue(warning.get().contains("subscriber-missing-endpoint"));
+        assertTrue(warning.get().contains(connection.connectionId()));
+    }
+
     // Verifies that MQTT 5 inbound PUBLISH User Property values are passed to the protocol engine.
     @Test
     void shouldMapMqtt5PublishUserProperties() throws Exception {
@@ -684,6 +713,16 @@ class VertxMqttBrokerTransportTest {
         ((Uni<Integer>) method.invoke(transport, endpoint, delivery)).await().indefinitely();
     }
 
+    private static void sendPublishToSubscriber(
+            VertxMqttBrokerTransport transport,
+            PublishDelivery delivery) throws Exception {
+        Method method = VertxMqttBrokerTransport.class.getDeclaredMethod(
+                "sendPublishToSubscriber",
+                PublishDelivery.class);
+        method.setAccessible(true);
+        method.invoke(transport, delivery);
+    }
+
     private static PublishProperties userProperties(MqttUserProperty... userProperties) {
         return new PublishProperties(new MqttUserProperties(List.of(userProperties)));
     }
@@ -767,6 +806,39 @@ class VertxMqttBrokerTransportTest {
 
             @Override
             public void protocolWarning(ClientConnection connection, String message) {
+            }
+        };
+    }
+
+    private static BrokerEventSink brokerEventSinkCapturingWarning(AtomicReference<String> warning) {
+        return new BrokerEventSink() {
+            @Override
+            public void transportStarted(String host, int port) {
+            }
+
+            @Override
+            public void transportStopped() {
+            }
+
+            @Override
+            public void connectionAccepted(ClientConnection connection) {
+            }
+
+            @Override
+            public void subscriptionAdded(ClientConnection connection, String topicFilter) {
+            }
+
+            @Override
+            public void subscriptionRemoved(ClientConnection connection, String topicFilter) {
+            }
+
+            @Override
+            public void messageRouted(ClientConnection connection, String topicName, int matchedClients) {
+            }
+
+            @Override
+            public void protocolWarning(ClientConnection connection, String message) {
+                warning.set(message);
             }
         };
     }
