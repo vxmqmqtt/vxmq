@@ -572,6 +572,28 @@ class VertxMqttBrokerTransportTest {
                 request.willMessage().properties().userProperties().values());
     }
 
+    // Verifies that a QoS 2 CONNECT will is preserved in the broker will model.
+    @Test
+    void shouldMapQos2Will() throws Exception {
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngineReturning(InboundPublishOutcome.rejected()),
+                new ClientConnectionRegistry(),
+                brokerEventSink());
+        MqttWill will = new MqttWill(
+                true,
+                "status/client-will",
+                Buffer.buffer("offline"),
+                2,
+                false,
+                MqttProperties.NO_PROPERTIES);
+
+        ConnectRequest request = buildConnectRequest(transport, new ConnectEndpointProbe(5, will).endpoint());
+
+        assertEquals(MqttQoS.EXACTLY_ONCE, request.willMessage().qos());
+    }
+
     // Verifies that MQTT 5 CONNECT User Property values are exposed to downstream auth providers.
     @Test
     void shouldExposeMqtt5ConnectUserPropertiesToAuthProvider() throws Exception {

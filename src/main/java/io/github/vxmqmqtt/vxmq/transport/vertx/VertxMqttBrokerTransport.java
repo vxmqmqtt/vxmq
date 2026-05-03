@@ -524,9 +524,11 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
         return new WillMessage(
                 will.getWillTopic(),
                 will.getWillMessageBytes() == null ? null : will.getWillMessageBytes().clone(),
-                will.getWillQos() <= 0
-                        ? io.netty.handler.codec.mqtt.MqttQoS.AT_MOST_ONCE
-                        : io.netty.handler.codec.mqtt.MqttQoS.AT_LEAST_ONCE,
+                switch (will.getWillQos()) {
+                    case 2 -> io.netty.handler.codec.mqtt.MqttQoS.EXACTLY_ONCE;
+                    case 1 -> io.netty.handler.codec.mqtt.MqttQoS.AT_LEAST_ONCE;
+                    default -> io.netty.handler.codec.mqtt.MqttQoS.AT_MOST_ONCE;
+                },
                 will.isWillRetain(),
                 new PublishProperties(userProperties(protocolVersion, will.getWillProperties())));
     }

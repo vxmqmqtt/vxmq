@@ -349,6 +349,14 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         return new PublishRoutingResult(deliveries, queuedMessageCount);
     }
 
+     private PublishRoutingResult routeServerPublish(ClientConnection connection, PublishRequest request) {
+        if (!mqttTopicSupport.isValidTopicName(request.topicName())) {
+            brokerEventSink.protocolWarning(connection, "Rejected server publish with invalid topic name: " + request.topicName());
+            return new PublishRoutingResult(List.of(), 0);
+        }
+        return routePublish(connection, request);
+    }
+
     @Override
     public SessionResumePlan handleSessionResume(ClientConnection connection) {
         if (connection.effectiveClientId() == null) {
@@ -683,7 +691,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             sessionRegistry.discardWillMessage(connection.effectiveClientId(), connection.connectionId());
         }
 
-        InboundPublishOutcome publishResult = handlePublish(connection, new PublishRequest(
+        PublishRoutingResult routingResult = routeServerPublish(connection, new PublishRequest(
                 willMessage.topicName(),
                 0,
                 willMessage.qos().value(),
@@ -691,6 +699,6 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 false,
                 willMessage.payloadCopy(),
                 willMessage.properties()));
-        return publishResult.deliveryPlan().deliveries();
+        return routingResult.deliveries();
     }
 }

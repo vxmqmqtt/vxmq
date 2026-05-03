@@ -1179,6 +1179,32 @@ class DefaultProtocolEngineTest {
                 deliveryFor(deliveries, "subscriber-will-user-properties").properties().userProperties().values());
     }
 
+    // Verifies that a server-originated QoS 2 will is routed immediately instead of entering inbound QoS 2 handshaking.
+    @Test
+    void shouldPublishQos2WillAfterAbnormalClose() {
+        ClientConnection subscriber = connectClient("subscriber-qos2-will", 5, true, false, 0L);
+        protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("status/+", 2))));
+        ClientConnection publisher = connectClient(
+                "publisher-qos2-will",
+                5,
+                false,
+                false,
+                60L,
+                new WillMessage(
+                        "status/publisher-qos2-will",
+                        "offline".getBytes(),
+                        MqttQoS.EXACTLY_ONCE,
+                        false));
+
+        List<PublishDelivery> deliveries = protocolEngine.handleConnectionClosed(publisher);
+
+        PublishDelivery delivery = deliveryFor(deliveries, "subscriber-qos2-will");
+        assertEquals(MqttQoS.EXACTLY_ONCE, delivery.grantedQos());
+        assertNotNull(delivery.packetId());
+        assertTrue(retainedMessageRegistry.findExact("status/publisher-qos2-will").isEmpty());
+    }
+
     // Verifies that retained will user properties are saved and replayed with the retained message.
     @Test
     void shouldReplayRetainedWillWithUserProperties() {
@@ -1208,6 +1234,36 @@ class DefaultProtocolEngineTest {
                         .properties()
                         .userProperties()
                         .values());
+    }
+
+    // Verifies that a retained QoS 2 will is saved and replayed using QoS 2 outbound state.
+    @Test
+    void shouldReplayRetainedQos2Will() {
+        ClientConnection publisher = connectClient(
+                "publisher-retained-qos2-will",
+                5,
+                false,
+                false,
+                60L,
+                new WillMessage(
+                        "status/publisher-retained-qos2-will",
+                        "offline".getBytes(),
+                        MqttQoS.EXACTLY_ONCE,
+                        true));
+        protocolEngine.handleConnectionClosed(publisher);
+
+        assertEquals(MqttQoS.EXACTLY_ONCE,
+                retainedMessageRegistry.findExact("status/publisher-retained-qos2-will").orElseThrow().qos());
+
+        ClientConnection subscriber = connectClient("subscriber-retained-qos2-will", 5, true, false, 0L);
+        SubscribeOutcome outcome = protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("status/+", 2))));
+
+        PublishDelivery retainedDelivery = deliveryFor(
+                outcome.retainedReplayPlan().deliveries(),
+                "subscriber-retained-qos2-will");
+        assertEquals(MqttQoS.EXACTLY_ONCE, retainedDelivery.grantedQos());
+        assertNotNull(retainedDelivery.packetId());
     }
 
     // Verifies that closing a superseded connection does not accidentally unbind the newer takeover session.
