@@ -86,6 +86,10 @@ public final class ClientConnection {
 
     /**
      * Clears and returns the will for this live connection so it can be published only once.
+     *
+     * This live-connection snapshot is consumed by the transport close/disconnect event sequence. If future
+     * callers consume it from multiple threads directly, replace the volatile field with synchronized or CAS
+     * ownership so the one-shot guarantee remains explicit.
      */
     public WillMessage takeWillMessage() {
         WillMessage current = willMessage;
@@ -108,7 +112,13 @@ public final class ClientConnection {
      * Records the current lifecycle state of the transport connection.
      */
     public void transitionTo(ConnectionState newState) {
-        this.state = Objects.requireNonNull(newState, "newState");
+        ConnectionState target = Objects.requireNonNull(newState, "newState");
+        ConnectionState current = state;
+        if (!current.canTransitionTo(target)) {
+            throw new IllegalStateException(
+                    "Invalid connection state transition from %s to %s".formatted(current, target));
+        }
+        this.state = target;
     }
 
     private WillMessage copyWillMessage(WillMessage source) {

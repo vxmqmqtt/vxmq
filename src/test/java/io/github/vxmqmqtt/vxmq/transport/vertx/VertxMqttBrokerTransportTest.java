@@ -632,6 +632,7 @@ class VertxMqttBrokerTransportTest {
             return request.properties().userProperties().values().contains(new MqttUserProperty("auth-hint", "allow"));
         };
         MqttTopicSupport topicSupport = new DefaultMqttTopicSupport();
+        ClientConnectionRegistry connectionRegistry = new ClientConnectionRegistry();
         DefaultProtocolEngine protocolEngine =
                 new DefaultProtocolEngine(
                         authProvider,
@@ -640,8 +641,8 @@ class VertxMqttBrokerTransportTest {
                         new InMemorySubscriptionRegistry(topicSupport),
                         topicSupport,
                         brokerEventSink(),
-                        new ClientConnectionRegistry());
-        ClientConnection connection = new ClientConnection("connection-auth", "remote", "client-auth", "MQTT", 5, true);
+                        connectionRegistry);
+        ClientConnection connection = connectionRegistry.open("remote", "client-auth", "MQTT", 5, true);
         MqttProperties connectProperties = new MqttProperties();
         connectProperties.add(new MqttProperties.UserProperty("auth-hint", "allow"));
         ConnectRequest request = buildConnectRequest(

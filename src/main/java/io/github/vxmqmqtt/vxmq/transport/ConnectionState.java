@@ -8,5 +8,21 @@ public enum ConnectionState {
     CONNECTING,
     CONNECTED,
     DISCONNECTING,
-    CLOSED
+    CLOSED;
+
+    public boolean canTransitionTo(ConnectionState target) {
+        if (target == null) {
+            return false;
+        }
+        if (this == target) {
+            return true;
+        }
+        return switch (this) {
+            case NEW -> target == CONNECTING || target == CLOSED;
+            case CONNECTING -> target == CONNECTED || target == CLOSED;
+            case CONNECTED -> target == DISCONNECTING || target == CLOSED;
+            case DISCONNECTING -> target == CLOSED;
+            case CLOSED -> false;
+        };
+    }
 }
