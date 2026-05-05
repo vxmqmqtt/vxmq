@@ -6,6 +6,10 @@ vxmq:
     max-message-size: 268435455
     timeout-on-connect-seconds: 10
     offline-queue-capacity-per-session: 1024
+    authn:
+      no-match: allow
+    authz:
+      no-match: allow
 
 quarkus:
   kafka:

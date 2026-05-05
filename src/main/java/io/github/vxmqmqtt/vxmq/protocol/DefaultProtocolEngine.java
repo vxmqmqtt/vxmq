@@ -1,6 +1,14 @@
 package io.github.vxmqmqtt.vxmq.protocol;
 
-import io.github.vxmqmqtt.vxmq.auth.AuthProvider;
+import io.github.vxmqmqtt.vxmq.authn.AuthnProvider;
+import io.github.vxmqmqtt.vxmq.authn.AuthnResult;
+import io.github.vxmqmqtt.vxmq.authz.AuthzAction;
+import io.github.vxmqmqtt.vxmq.authz.AuthzChain;
+import io.github.vxmqmqtt.vxmq.authz.AuthzContext;
+import io.github.vxmqmqtt.vxmq.authz.AuthzProvider;
+import io.github.vxmqmqtt.vxmq.authz.AuthzResult;
+import io.github.vxmqmqtt.vxmq.authz.ConfiguredAuthzProvider;
+import io.github.vxmqmqtt.vxmq.authz.PermitAllAuthzProvider;
 import io.github.vxmqmqtt.vxmq.observability.BrokerEventSink;
 import io.github.vxmqmqtt.vxmq.protocol.model.AcceptedConnectResponse;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectOutcome;
@@ -57,6 +65,7 @@ import io.vertx.mqtt.messages.codes.MqttPubRelReasonCode;
 import io.vertx.mqtt.messages.codes.MqttSubAckReasonCode;
 import io.vertx.mqtt.messages.codes.MqttUnsubAckReasonCode;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -69,7 +78,8 @@ import java.util.UUID;
 @ApplicationScoped
 public class DefaultProtocolEngine implements ProtocolEngine {
 
-    private final AuthProvider authProvider;
+    private final AuthnProvider authnProvider;
+    private final AuthzProvider authzProvider;
     private final SessionRegistry sessionRegistry;
     private final RetainedMessageRegistry retainedMessageRegistry;
     private final SubscriptionRegistry subscriptionRegistry;
@@ -79,7 +89,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     private final Clock clock;
 
     public DefaultProtocolEngine(
-            AuthProvider authProvider,
+            AuthnProvider authnProvider,
             SessionRegistry sessionRegistry,
             RetainedMessageRegistry retainedMessageRegistry,
             SubscriptionRegistry subscriptionRegistry,
@@ -87,7 +97,30 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             BrokerEventSink brokerEventSink,
             ClientConnectionRegistry connectionRegistry) {
         this(
-                authProvider,
+                authnProvider,
+                new PermitAllAuthzProvider(),
+                sessionRegistry,
+                retainedMessageRegistry,
+                subscriptionRegistry,
+                mqttTopicSupport,
+                brokerEventSink,
+                connectionRegistry,
+                Clock.systemUTC());
+    }
+
+    @Inject
+    public DefaultProtocolEngine(
+            AuthnProvider authnProvider,
+            AuthzProvider authzProvider,
+            SessionRegistry sessionRegistry,
+            RetainedMessageRegistry retainedMessageRegistry,
+            SubscriptionRegistry subscriptionRegistry,
+            MqttTopicSupport mqttTopicSupport,
+            BrokerEventSink brokerEventSink,
+            ClientConnectionRegistry connectionRegistry) {
+        this(
+                authnProvider,
+                authzProvider,
                 sessionRegistry,
                 retainedMessageRegistry,
                 subscriptionRegistry,
@@ -98,7 +131,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     }
 
     public DefaultProtocolEngine(
-            AuthProvider authProvider,
+            AuthnProvider authnProvider,
             SessionRegistry sessionRegistry,
             RetainedMessageRegistry retainedMessageRegistry,
             SubscriptionRegistry subscriptionRegistry,
@@ -106,7 +139,56 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             BrokerEventSink brokerEventSink,
             ClientConnectionRegistry connectionRegistry,
             Clock clock) {
-        this.authProvider = authProvider;
+        this(
+                authnProvider,
+                new PermitAllAuthzProvider(),
+                sessionRegistry,
+                retainedMessageRegistry,
+                subscriptionRegistry,
+                mqttTopicSupport,
+                brokerEventSink,
+                connectionRegistry,
+                clock);
+    }
+
+    public DefaultProtocolEngine(
+            AuthnProvider authnProvider,
+            AuthzChain authzChain,
+            SessionRegistry sessionRegistry,
+            RetainedMessageRegistry retainedMessageRegistry,
+            SubscriptionRegistry subscriptionRegistry,
+            MqttTopicSupport mqttTopicSupport,
+            BrokerEventSink brokerEventSink,
+            ClientConnectionRegistry connectionRegistry,
+            Clock clock) {
+        this(
+                authnProvider,
+                authzChain == null
+                        ? new PermitAllAuthzProvider()
+                        : new ConfiguredAuthzProvider(authzChain),
+                sessionRegistry,
+                retainedMessageRegistry,
+                subscriptionRegistry,
+                mqttTopicSupport,
+                brokerEventSink,
+                connectionRegistry,
+                clock);
+    }
+
+    public DefaultProtocolEngine(
+            AuthnProvider authnProvider,
+            AuthzProvider authzProvider,
+            SessionRegistry sessionRegistry,
+            RetainedMessageRegistry retainedMessageRegistry,
+            SubscriptionRegistry subscriptionRegistry,
+            MqttTopicSupport mqttTopicSupport,
+            BrokerEventSink brokerEventSink,
+            ClientConnectionRegistry connectionRegistry,
+            Clock clock) {
+        this.authnProvider = authnProvider;
+        this.authzProvider = authzProvider == null
+                ? new PermitAllAuthzProvider()
+                : authzProvider;
         this.sessionRegistry = sessionRegistry;
         this.retainedMessageRegistry = retainedMessageRegistry;
         this.subscriptionRegistry = subscriptionRegistry;
@@ -126,8 +208,13 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                     MqttProperties.NO_PROPERTIES));
         }
 
-        if (!authProvider.allowConnect(connection, request)) {
-            brokerEventSink.protocolWarning(connection, "Connection rejected by auth provider");
+        AuthnResult authnResult = authnProvider.authenticate(connection, request);
+        if (!authnResult.allowed()) {
+            brokerEventSink.protocolWarning(
+                    connection,
+                    "Connection rejected by authn provider: "
+                            + authnResult.reason()
+                            + diagnosticSuffix(authnResult));
             return ConnectOutcome.rejected(new RejectedConnectResponse(
                     rejectNotAuthorized(request),
                     MqttProperties.NO_PROPERTIES));
@@ -141,12 +228,29 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                     MqttProperties.NO_PROPERTIES));
         }
 
+        AuthzResult willAuthzResult = authorizeWillPublish(
+                connection,
+                effectiveClientId,
+                authnResult.principal(),
+                request);
+        if (!willAuthzResult.allowed()) {
+            brokerEventSink.protocolWarning(
+                    connection,
+                    "Connection rejected by will authorization: "
+                            + willAuthzResult.reason()
+                            + diagnosticSuffix(willAuthzResult));
+            return ConnectOutcome.rejected(new RejectedConnectResponse(
+                    rejectNotAuthorized(request),
+                    MqttProperties.NO_PROPERTIES));
+        }
+
         MqttProperties responseProperties = buildConnectResponseProperties(request, effectiveClientId);
         SessionOpenResult sessionOpenResult = sessionRegistry.openSession(
                 effectiveClientId,
                 buildSessionOpenRequest(request, connection.connectionId()));
         clearRoutingBindings(sessionOpenResult.clearedSession());
         connection.assignClientId(effectiveClientId);
+        connection.assignPrincipal(authnResult.principal());
         connection.assignWillMessage(request.willMessage());
         connection.transitionTo(ConnectionState.CONNECTED);
         // A new connection with the same client identifier replaces the old one.
@@ -178,6 +282,24 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             if (!isSupportedRequestedQos(item.requestedQos())) {
                 brokerEventSink.protocolWarning(connection, "Rejected unsupported requested QoS: " + item.requestedQos());
                 results.add(SubscriptionItemResult.rejected(topicFilter, MqttSubAckReasonCode.IMPLEMENTATION_SPECIFIC_ERROR));
+                continue;
+            }
+
+            AuthzResult authzResult = authzProvider.authorize(new AuthzContext(
+                    connection,
+                    connection.effectiveClientId(),
+                    connection.principal(),
+                    AuthzAction.SUBSCRIBE,
+                    topicFilter));
+            if (!authzResult.allowed()) {
+                brokerEventSink.protocolWarning(
+                        connection,
+                        "Rejected unauthorized subscription: "
+                                + topicFilter
+                                + " reason="
+                                + authzResult.reason()
+                                + diagnosticSuffix(authzResult));
+                results.add(SubscriptionItemResult.rejected(topicFilter, MqttSubAckReasonCode.NOT_AUTHORIZED));
                 continue;
             }
 
@@ -260,6 +382,23 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         if (request.qos() < 0 || request.qos() > 2) {
             brokerEventSink.protocolWarning(connection, "Rejected unsupported inbound QoS: " + request.qos());
             return InboundPublishOutcome.rejectedWithDisconnect(MqttDisconnectReasonCode.QOS_NOT_SUPPORTED);
+        }
+
+        AuthzResult authzResult = authzProvider.authorize(new AuthzContext(
+                connection,
+                connection.effectiveClientId(),
+                connection.principal(),
+                AuthzAction.PUBLISH,
+                request.topicName()));
+        if (!authzResult.allowed()) {
+            brokerEventSink.protocolWarning(
+                    connection,
+                    "Rejected unauthorized publish: "
+                            + request.topicName()
+                            + " reason="
+                            + authzResult.reason()
+                            + diagnosticSuffix(authzResult));
+            return rejectUnauthorizedPublish(connection, request);
         }
 
         if (request.qos() == 2) {
@@ -541,6 +680,39 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         return MqttConnectReturnCode.CONNECTION_REFUSED_IDENTIFIER_REJECTED;
     }
 
+    private AuthzResult authorizeWillPublish(
+            ClientConnection connection,
+            String effectiveClientId,
+            String principal,
+            ConnectRequest request) {
+        WillMessage willMessage = request.willMessage();
+        if (willMessage == null) {
+            return AuthzResult.allow();
+        }
+        return authzProvider.authorize(new AuthzContext(
+                connection,
+                effectiveClientId,
+                principal,
+                AuthzAction.PUBLISH,
+                willMessage.topicName()));
+    }
+
+    private InboundPublishOutcome rejectUnauthorizedPublish(ClientConnection connection, PublishRequest request) {
+        if (connection.protocolVersion() == 5) {
+            if (request.qos() == 1) {
+                return InboundPublishOutcome.completed(
+                        DeliveryPlan.empty(),
+                        PublishAcknowledgement.pubAck(MqttPubAckReasonCode.NOT_AUTHORIZED));
+            }
+            if (request.qos() == 2) {
+                return InboundPublishOutcome.deferred(
+                        PublishAcknowledgement.pubRec(MqttPubRecReasonCode.NOT_AUTHORIZED));
+            }
+            return InboundPublishOutcome.rejectedWithDisconnect(MqttDisconnectReasonCode.NOT_AUTHORIZED);
+        }
+        return InboundPublishOutcome.rejectedWithDisconnect(null);
+    }
+
     private boolean isSupportedRequestedQos(int requestedQos) {
         return requestedQos >= 0 && requestedQos <= 2;
     }
@@ -669,6 +841,14 @@ public class DefaultProtocolEngine implements ProtocolEngine {
 
     private byte[] copyPayload(byte[] payload) {
         return payload == null ? null : payload.clone();
+    }
+
+    private static String diagnosticSuffix(AuthnResult result) {
+        return result.message() == null ? "" : " (" + result.message() + ")";
+    }
+
+    private static String diagnosticSuffix(AuthzResult result) {
+        return result.message() == null ? "" : " (" + result.message() + ")";
     }
 
     private record PublishRoutingResult(List<PublishDelivery> deliveries, int queuedMessageCount) {

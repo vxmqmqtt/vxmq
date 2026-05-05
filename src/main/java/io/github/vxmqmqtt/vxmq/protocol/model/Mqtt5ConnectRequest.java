@@ -9,6 +9,7 @@ public record Mqtt5ConnectRequest(
         boolean cleanStart,
         long sessionExpiryIntervalSeconds,
         String username,
+        String password,
         boolean passwordPresent,
         WillMessage willMessage,
         ConnectProperties properties) implements ConnectRequest {
@@ -21,8 +22,35 @@ public record Mqtt5ConnectRequest(
             String username,
             boolean passwordPresent,
             WillMessage willMessage) {
-        this(requestedClientId, protocolName, cleanStart, sessionExpiryIntervalSeconds, username, passwordPresent,
+        this(requestedClientId, protocolName, cleanStart, sessionExpiryIntervalSeconds, username, null, passwordPresent,
                 willMessage, ConnectProperties.empty());
+    }
+
+    public Mqtt5ConnectRequest(
+            String requestedClientId,
+            String protocolName,
+            boolean cleanStart,
+            long sessionExpiryIntervalSeconds,
+            String username,
+            String password,
+            boolean passwordPresent,
+            WillMessage willMessage) {
+        this(requestedClientId, protocolName, cleanStart, sessionExpiryIntervalSeconds, username, password, passwordPresent,
+                willMessage, ConnectProperties.empty());
+    }
+
+    public Mqtt5ConnectRequest(
+            String requestedClientId,
+            String protocolName,
+            boolean cleanStart,
+            long sessionExpiryIntervalSeconds,
+            String username,
+            String password,
+            boolean passwordPresent,
+            WillMessage willMessage,
+            MqttUserProperties userProperties) {
+        this(requestedClientId, protocolName, cleanStart, sessionExpiryIntervalSeconds, username, password, passwordPresent,
+                willMessage, new ConnectProperties(userProperties));
     }
 
     public Mqtt5ConnectRequest(
@@ -34,7 +62,7 @@ public record Mqtt5ConnectRequest(
             boolean passwordPresent,
             WillMessage willMessage,
             MqttUserProperties userProperties) {
-        this(requestedClientId, protocolName, cleanStart, sessionExpiryIntervalSeconds, username, passwordPresent,
+        this(requestedClientId, protocolName, cleanStart, sessionExpiryIntervalSeconds, username, null, passwordPresent,
                 willMessage, new ConnectProperties(userProperties));
     }
 

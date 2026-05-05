@@ -33,7 +33,8 @@ flowchart TD
         Session["session"]
         Routing["routing"]
         Retained["retained"]
-        Auth["auth"]
+        Authn["authn"]
+        Authz["authz"]
         Observability["observability"]
         Connections["connectionRegistry"]
     end
@@ -45,6 +46,7 @@ flowchart TD
     Protocol --> Routing
     Protocol --> Retained
     Protocol --> Auth
+    Protocol --> Authz
     Protocol --> Observability
     Protocol --> Connections
 ```
@@ -75,7 +77,7 @@ flowchart TD
 ### `protocol`
 
 - 聚合 CONNECT、SUBSCRIBE、UNSUBSCRIBE、PUBLISH、DISCONNECT 与连接关闭的处理决策。
-- 组合 `auth`、`session`、`routing`、`retained`、`connectionRegistry` 和 `observability`。
+- 组合 `authn`、`authz`、`session`、`routing`、`retained`、`connectionRegistry` 和 `observability`。
 - 输出标准化结果模型，供 `transport` 映射为具体报文行为。
 
 ### `session`
@@ -96,11 +98,21 @@ flowchart TD
 - 负责 retained 消息的写入、覆盖、清除和订阅后查询。
 - 不保存订阅状态，也不参与普通在线订阅匹配。
 
-### `auth`
+### `authn`
 
-- 提供连接鉴权扩展点。
+- 提供客户端认证链。
+- 当前支持配置驱动的 static username/password backend。
+- Broker 默认配置保持 permit-all；启用认证资源后若未显式设置 no-match，链未匹配按 fail-closed 拒绝。
+- 认证资源以有序、可启停 definition 建模，为未来后台管理系统运行时创建、排序和启停预留边界。
 - 可从 `ConnectRequest` 读取 MQTT 5 CONNECT `User Property`，供后续认证插件使用。
-- 当前默认实现为 `permit-all`。
+
+### `authz`
+
+- 提供客户端操作鉴权 provider 和鉴权链。
+- 当前已接入 CONNECT Will、SUBSCRIBE 和 PUBLISH 主链路。
+- 鉴权上下文包含 `clientId`、认证后的 principal、操作类型和 topic。
+- Broker 默认配置保持 permit-all，不提供实际 ACL 规则；后续启用鉴权资源后若未显式设置 no-match，链未匹配按 fail-closed 拒绝。
+- 后续 ACL、HTTP、SQL 或缓存型 authorizer 应复用同一 `AuthzProvider` 边界。
 
 ### `observability`
 
@@ -137,16 +149,18 @@ flowchart TD
 ### 连接建立
 
 1. `transport` 接收 CONNECT 并转换为内部 `ConnectRequest`。
-2. `protocol` 校验协议、鉴权、解析 `clientId`，并决定新建会话、恢复会话或接管旧连接。
-3. `session` 与 `connectionRegistry` 更新连接归属。
-4. `transport` 按版本差异返回 CONNACK，并在必要时关闭旧连接。
+2. `protocol` 校验协议、执行认证、解析 `clientId`，并在 CONNECT Will 存在时执行 publish 鉴权。
+3. `protocol` 决定新建会话、恢复会话或接管旧连接。
+4. `session` 与 `connectionRegistry` 更新连接归属。
+5. `transport` 按版本差异返回 CONNACK，并在必要时关闭旧连接。
 
 ### 发布订阅
 
 1. `transport` 接收 SUBSCRIBE、UNSUBSCRIBE 或 PUBLISH。
-2. `protocol` 完成语义校验并更新 `session`、`routing`、`retained`。
-3. `routing` 解析命中订阅集合，`retained` 负责 retained 查询或更新。
-4. `transport` 根据在线 endpoint 执行实际消息投递。
+2. `protocol` 完成语义校验，并对 SUBSCRIBE / PUBLISH 执行操作鉴权。
+3. `protocol` 在鉴权通过后更新 `session`、`routing`、`retained`。
+4. `routing` 解析命中订阅集合，`retained` 负责 retained 查询或更新。
+5. `transport` 根据在线 endpoint 执行实际消息投递。
 
 ### 断连
 
@@ -159,6 +173,6 @@ flowchart TD
 
 - QoS 2 状态机。
 - MQTT 5 订阅增强能力与关键属性。
-- 用户名密码鉴权。
+- 外部认证后端与实际 ACL 鉴权规则。
 - 健康检查、指标和日志诊断增强。
 - 持久化与跨重启恢复。

@@ -5,7 +5,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.github.vxmqmqtt.vxmq.auth.PermitAllAuthProvider;
+import io.github.vxmqmqtt.vxmq.authn.AuthnNoMatchPolicy;
+import io.github.vxmqmqtt.vxmq.authn.AuthnProvider;
+import io.github.vxmqmqtt.vxmq.authn.AuthnChain;
+import io.github.vxmqmqtt.vxmq.authn.AuthnDefinition;
+import io.github.vxmqmqtt.vxmq.authn.ConfiguredAuthnProvider;
+import io.github.vxmqmqtt.vxmq.authn.PermitAllAuthnProvider;
+import io.github.vxmqmqtt.vxmq.authn.StaticPasswordAuthnAuthenticator;
 import io.github.vxmqmqtt.vxmq.config.BrokerRuntimeConfig;
 import io.github.vxmqmqtt.vxmq.observability.BrokerEventSink;
 import io.github.vxmqmqtt.vxmq.protocol.DefaultProtocolEngine;
@@ -15,18 +21,21 @@ import io.github.vxmqmqtt.vxmq.routing.InMemorySubscriptionRegistry;
 import io.github.vxmqmqtt.vxmq.session.InMemorySessionRegistry;
 import io.github.vxmqmqtt.vxmq.transport.ClientConnection;
 import io.github.vxmqmqtt.vxmq.transport.ClientConnectionRegistry;
-import io.github.vxmqmqtt.vxmq.transport.ConnectionState;
 import io.netty.handler.codec.mqtt.MqttConnectReturnCode;
 import io.netty.handler.codec.mqtt.MqttQoS;
 import io.smallrye.mutiny.Uni;
+import io.vertx.mqtt.MqttConnectionException;
 import io.vertx.mqtt.MqttClientOptions;
 import io.vertx.mutiny.core.Vertx;
 import io.vertx.mutiny.core.buffer.Buffer;
 import io.vertx.mutiny.mqtt.MqttClient;
+import io.vertx.mutiny.mqtt.messages.MqttConnAckMessage;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -79,6 +88,33 @@ class VertxMqttBrokerTransportIntegrationTest {
                 false).await().indefinitely();
 
         assertEquals("payload", receivedPayload.get(5, TimeUnit.SECONDS));
+    }
+
+    // Verifies that a configured static username/password authenticator accepts matching credentials.
+    @Test
+    void shouldAcceptClientWithConfiguredStaticPassword() {
+        int port = startBrokerWithStaticUser("device-a", "secret-a");
+        publisher = mqttClient("device-a", "device-a", "secret-a");
+
+        MqttConnAckMessage connAck = publisher.connect(port, "127.0.0.1").await().indefinitely();
+
+        assertEquals(MqttConnectReturnCode.CONNECTION_ACCEPTED, connAck.code());
+    }
+
+    // Verifies that a configured static username/password authenticator rejects wrong credentials.
+    @Test
+    void shouldRejectClientWithWrongStaticPassword() {
+        int port = startBrokerWithStaticUser("device-a", "secret-a");
+        publisher = mqttClient("device-a", "device-a", "wrong");
+
+        CompletionException exception = assertThrows(
+                CompletionException.class,
+                () -> publisher.connect(port, "127.0.0.1").await().indefinitely());
+
+        assertTrue(exception.getCause() instanceof MqttConnectionException);
+        assertEquals(
+                MqttConnectReturnCode.CONNECTION_REFUSED_NOT_AUTHORIZED,
+                ((MqttConnectionException) exception.getCause()).code());
     }
 
     // Verifies the online QoS 1 path: publish, subscriber receives, and subscriber acknowledges.
@@ -580,6 +616,23 @@ class VertxMqttBrokerTransportIntegrationTest {
     }
 
     private int startBroker(int offlineQueueCapacityPerSession) {
+        return startBroker(offlineQueueCapacityPerSession, new PermitAllAuthnProvider());
+    }
+
+    private int startBrokerWithStaticUser(String username, String password) {
+        return startBroker(new ConfiguredAuthnProvider(new AuthnChain(
+                List.of(new AuthnDefinition(
+                        "local-users",
+                        true,
+                        new StaticPasswordAuthnAuthenticator(Map.of(username, password)))),
+                AuthnNoMatchPolicy.DENY)));
+    }
+
+    private int startBroker(AuthnProvider authnProvider) {
+        return startBroker(1024, authnProvider);
+    }
+
+    private int startBroker(int offlineQueueCapacityPerSession, AuthnProvider authnProvider) {
         vertx = Vertx.vertx();
         DefaultMqttTopicSupport mqttTopicSupport = new DefaultMqttTopicSupport();
         ClientConnectionRegistry connectionRegistry = new ClientConnectionRegistry();
@@ -587,7 +640,7 @@ class VertxMqttBrokerTransportIntegrationTest {
                 vertx,
                 new TestBrokerRuntimeConfig(offlineQueueCapacityPerSession),
                 new DefaultProtocolEngine(
-                        new PermitAllAuthProvider(),
+                        authnProvider,
                         new InMemorySessionRegistry(offlineQueueCapacityPerSession),
                         new InMemoryRetainedMessageRegistry(mqttTopicSupport),
                         new InMemorySubscriptionRegistry(mqttTopicSupport),
@@ -623,6 +676,18 @@ class VertxMqttBrokerTransportIntegrationTest {
                 .setCleanSession(cleanSession)
                 .setKeepAliveInterval(keepAliveIntervalSeconds)
                 .setAutoKeepAlive(autoKeepAlive);
+        return MqttClient.create(vertx, options);
+    }
+
+    private MqttClient mqttClient(String clientId, String username, String password) {
+        MqttClientOptions options = new MqttClientOptions()
+                .setAutoGeneratedClientId(false)
+                .setClientId(clientId)
+                .setUsername(username)
+                .setPassword(password)
+                .setCleanSession(true)
+                .setKeepAliveInterval(20)
+                .setAutoKeepAlive(true);
         return MqttClient.create(vertx, options);
     }
 

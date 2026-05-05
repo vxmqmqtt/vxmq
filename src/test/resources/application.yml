@@ -1,6 +1,10 @@
 vxmq:
   broker:
     enabled: false
+    authn:
+      no-match: allow
+    authz:
+      no-match: allow
 
 quarkus:
   kafka:

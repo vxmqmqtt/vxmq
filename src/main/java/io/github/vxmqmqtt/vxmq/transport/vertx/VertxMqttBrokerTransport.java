@@ -250,6 +250,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                     endpoint.protocolName(),
                     endpoint.isCleanSession(),
                     username(endpoint.auth()),
+                    password(endpoint.auth()),
                     passwordPresent(endpoint.auth()),
                     willMessage(endpoint.protocolVersion(), endpoint.will()));
         }
@@ -260,6 +261,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                     endpoint.isCleanSession(),
                     sessionExpiryIntervalSeconds(endpoint.connectProperties()),
                     username(endpoint.auth()),
+                    password(endpoint.auth()),
                     passwordPresent(endpoint.auth()),
                     willMessage(endpoint.protocolVersion(), endpoint.will()),
                     userProperties(endpoint.protocolVersion(), endpoint.connectProperties()));
@@ -270,6 +272,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                 endpoint.protocolName(),
                 endpoint.protocolVersion(),
                 username(endpoint.auth()),
+                password(endpoint.auth()),
                 passwordPresent(endpoint.auth()),
                 willMessage(endpoint.protocolVersion(), endpoint.will()));
     }
@@ -498,6 +501,10 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
 
     private String username(MqttAuth auth) {
         return auth == null ? null : auth.getUsername();
+    }
+
+    private String password(MqttAuth auth) {
+        return auth == null ? null : auth.getPassword();
     }
 
     private boolean passwordPresent(MqttAuth auth) {

@@ -19,7 +19,7 @@
 | 连接管理 | Persistent Session / Clean Session | M2 | 支持 | 不适用 | 已验证 | 已覆盖新建、恢复、删除与订阅恢复 |
 | 连接管理 | Clean Start / Session Expiry | M2 | 不适用 | 基础支持 | 已验证 | 已覆盖会话创建、恢复、懒清理与离线 QoS 1 恢复 |
 | 连接管理 | Disconnect 语义 | M1 | 基础支持 | 基础支持 | 已验证 | 已覆盖主动断连、接管断连与异常断连 |
-| 连接管理 | Enhanced Authentication / AUTH | M5 | 不适用 | 不支持 | 未开始 | MQTT 5 高级认证流程 |
+| 连接管理 | Enhanced Authn / AUTH | M5 | 不适用 | 不支持 | 未开始 | MQTT 5 高级认证流程 |
 | 发布订阅 | SUBSCRIBE / SUBACK | M1 | 支持 | 支持 | 已验证 | 已覆盖合法与非法 Topic Filter |
 | 发布订阅 | UNSUBSCRIBE / UNSUBACK | M1 | 支持 | 支持 | 已验证 | 已覆盖 MQTT 5 reason code |
 | 发布订阅 | PUBLISH QoS 0 主链路 | M1 | 支持 | 支持 | 已验证 | 已具备最小端到端闭环 |
@@ -43,7 +43,7 @@
 | MQTT 5 属性 | Response Topic / Correlation Data | M3 | 不适用 | 不支持 | 未开始 | 请求响应场景支撑 |
 | MQTT 5 属性 | Payload Format Indicator / Content Type | M3 | 不适用 | 不支持 | 未开始 | 语义透传为主 |
 | MQTT 5 属性 | 服务端能力声明 | M4 | 不适用 | 不支持 | 未开始 | 包括 `Maximum QoS`、`Retain Available`、`Wildcard Subscription Available`、`Shared Subscription Available` 等对外声明 |
-| 安全 | 用户名密码鉴权 | M3 | 不支持 | 不支持 | 未开始 | 先做基础接入，再扩展高级认证 |
+| 安全 | 用户名密码认证与鉴权链 | M3 | 基础支持 | 基础支持 | 已验证 | 配置驱动 static username/password；未启用认证资源时 permit-all；鉴权链已接入 CONNECT Will / SUBSCRIBE / PUBLISH，当前无 ACL 规则 |
 | 安全 | TLS | M4 | 不支持 | 不支持 | 未开始 | 与部署方式和证书管理联动 |
 | 运维 | 健康检查 | M3 | 不支持 | 不支持 | 未开始 | Broker 就绪态与活跃态 |
 | 运维 | Metrics | M3 | 不支持 | 不支持 | 未开始 | 连接数、消息速率、会话数等 |

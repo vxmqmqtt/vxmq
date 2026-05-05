@@ -14,6 +14,8 @@ public sealed interface ConnectRequest
 
     String username();
 
+    String password();
+
     boolean passwordPresent();
 
     WillMessage willMessage();

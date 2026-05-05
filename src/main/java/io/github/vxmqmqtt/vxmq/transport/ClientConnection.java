@@ -17,6 +17,7 @@ public final class ClientConnection {
     private final int protocolVersion;
     private final boolean startCleanSession;
     private volatile String effectiveClientId;
+    private volatile String principal;
     private volatile WillMessage willMessage;
     private volatile ConnectionState state;
 
@@ -68,6 +69,17 @@ public final class ClientConnection {
 
     public String effectiveClientId() {
         return effectiveClientId;
+    }
+
+    public String principal() {
+        return principal;
+    }
+
+    /**
+     * Stores the authenticated identity associated with this connection.
+     */
+    public void assignPrincipal(String principal) {
+        this.principal = principal;
     }
 
     /**

@@ -39,6 +39,23 @@ class ConnectRequestTest {
     }
 
     @Test
+    void shouldModelUsernameAndPassword() {
+        ConnectRequest request = new Mqtt5ConnectRequest(
+                "client-auth",
+                "MQTT",
+                true,
+                0L,
+                "device-a",
+                "secret-a",
+                true,
+                null);
+
+        assertEquals("device-a", request.username());
+        assertEquals("secret-a", request.password());
+        assertTrue(request.passwordPresent());
+    }
+
+    @Test
     void shouldModelUnsupportedConnectRequest() {
         ConnectRequest request = new UnsupportedConnectRequest("client-x", "MQTT", 7, null, false, null);
 

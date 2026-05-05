@@ -6,7 +6,18 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.github.vxmqmqtt.vxmq.auth.PermitAllAuthProvider;
+import io.github.vxmqmqtt.vxmq.authn.AuthnProvider;
+import io.github.vxmqmqtt.vxmq.authn.AuthnResult;
+import io.github.vxmqmqtt.vxmq.authn.PermitAllAuthnProvider;
+import io.github.vxmqmqtt.vxmq.authz.AuthzAction;
+import io.github.vxmqmqtt.vxmq.authz.AuthzChain;
+import io.github.vxmqmqtt.vxmq.authz.AuthzNoMatchPolicy;
+import io.github.vxmqmqtt.vxmq.authz.AuthzProvider;
+import io.github.vxmqmqtt.vxmq.authz.AuthzReason;
+import io.github.vxmqmqtt.vxmq.authz.AuthzResult;
+import io.github.vxmqmqtt.vxmq.authz.AuthzDefinition;
+import io.github.vxmqmqtt.vxmq.authz.AuthzAuthorizer;
+import io.github.vxmqmqtt.vxmq.authz.ConfiguredAuthzProvider;
 import io.github.vxmqmqtt.vxmq.observability.BrokerEventSink;
 import io.github.vxmqmqtt.vxmq.protocol.model.AcceptedConnectResponse;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectOutcome;
@@ -50,6 +61,7 @@ import io.netty.handler.codec.mqtt.MqttQoS;
 import io.netty.handler.codec.mqtt.MqttSubscriptionOption.RetainedHandlingPolicy;
 import io.vertx.mqtt.messages.codes.MqttDisconnectReasonCode;
 import io.vertx.mqtt.messages.codes.MqttPubAckReasonCode;
+import io.vertx.mqtt.messages.codes.MqttPubRecReasonCode;
 import io.vertx.mqtt.messages.codes.MqttSubAckReasonCode;
 import io.vertx.mqtt.messages.codes.MqttUnsubAckReasonCode;
 import java.time.Clock;
@@ -60,6 +72,7 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -85,7 +98,7 @@ class DefaultProtocolEngineTest {
         subscriptionRegistry = new InMemorySubscriptionRegistry(mqttTopicSupport);
         clock = new MutableClock(Instant.parse("2026-04-30T00:00:00Z"));
         protocolEngine = new DefaultProtocolEngine(
-                new PermitAllAuthProvider(),
+                new PermitAllAuthnProvider(),
                 sessionRegistry,
                 retainedMessageRegistry,
                 subscriptionRegistry,
@@ -276,6 +289,23 @@ class DefaultProtocolEngineTest {
         assertTrue(sessionRegistry.find("client-invalid-sub").orElseThrow().subscriptions().isEmpty());
     }
 
+    // Verifies that subscription authorization rejects without mutating session or routing state.
+    @Test
+    void shouldRejectUnauthorizedSubscriptionWithoutMutatingState() {
+        ClientConnection connection = connectClient("client-sub-denied", 5, true, false, 0L);
+        protocolEngine = protocolEngineWithAuthz(context ->
+                context.action() == AuthzAction.SUBSCRIBE
+                        ? AuthzResult.deny(AuthzReason.NOT_AUTHORIZED)
+                        : AuthzResult.allow());
+
+        SubscribeOutcome result = protocolEngine.handleSubscribe(connection, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 0))));
+
+        assertEquals(MqttSubAckReasonCode.NOT_AUTHORIZED, result.ack().itemResults().getFirst().reasonCode());
+        assertTrue(sessionRegistry.find("client-sub-denied").orElseThrow().subscriptions().isEmpty());
+        assertTrue(subscriptionRegistry.match("sensors/room-1/temperature").isEmpty());
+    }
+
     // Verifies that a failed routing write for a new subscription does not leave session-only state behind.
     @Test
     void shouldRollbackNewSessionSubscriptionWhenRoutingAddFails() {
@@ -397,6 +427,53 @@ class DefaultProtocolEngineTest {
         assertEquals(1, result.deliveryPlan().deliveries().size());
         assertEquals("subscriber", result.deliveryPlan().deliveries().getFirst().clientId());
         assertEquals(MqttQoS.AT_MOST_ONCE, result.deliveryPlan().deliveries().getFirst().grantedQos());
+    }
+
+    // Verifies that publish authorization rejects QoS 1 without routing to subscribers.
+    @Test
+    void shouldRejectUnauthorizedQos1PublishWithoutRouting() {
+        ClientConnection publisher = connectClient("publisher-denied", 5, true, false, 0L);
+        ClientConnection subscriber = connectClient("subscriber-denied", 5, true, false, 0L);
+        protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 1))));
+        protocolEngine = protocolEngineWithAuthz(context ->
+                context.action() == AuthzAction.PUBLISH
+                        ? AuthzResult.deny(AuthzReason.NOT_AUTHORIZED)
+                        : AuthzResult.allow());
+
+        InboundPublishOutcome result = protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                7,
+                1,
+                false,
+                false,
+                "payload".getBytes()));
+
+        assertEquals(PublishAcknowledgementType.PUBACK, result.acknowledgement().type());
+        assertEquals(MqttPubAckReasonCode.NOT_AUTHORIZED, result.acknowledgement().mqtt5ReasonCode());
+        assertTrue(result.deliveryPlan().deliveries().isEmpty());
+    }
+
+    // Verifies that publish authorization rejects QoS 2 before creating inbound state.
+    @Test
+    void shouldRejectUnauthorizedQos2PublishWithoutCreatingInboundState() {
+        ClientConnection publisher = connectClient("publisher-qos2-denied", 5, true, false, 0L);
+        protocolEngine = protocolEngineWithAuthz(context ->
+                context.action() == AuthzAction.PUBLISH
+                        ? AuthzResult.deny(AuthzReason.NOT_AUTHORIZED)
+                        : AuthzResult.allow());
+
+        InboundPublishOutcome result = protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                8,
+                2,
+                false,
+                false,
+                "payload".getBytes()));
+
+        assertEquals(PublishAcknowledgementType.PUBREC, result.acknowledgement().type());
+        assertEquals(MqttPubRecReasonCode.NOT_AUTHORIZED, result.acknowledgement().mqtt5ReasonCode());
+        assertEquals(0, sessionRegistry.find("publisher-qos2-denied").orElseThrow().inboundQos2MessageCount());
     }
 
     // Verifies that online deliveries preserve MQTT 5 PUBLISH User Property order and duplicate keys.
@@ -1167,6 +1244,54 @@ class DefaultProtocolEngineTest {
         assertEquals(MqttDisconnectReasonCode.QOS_NOT_SUPPORTED, result.disconnectAction().reasonCode());
     }
 
+    // Verifies that will publish authorization rejects CONNECT before session state is created.
+    @Test
+    void shouldRejectConnectWhenWillPublishIsUnauthorized() {
+        protocolEngine = protocolEngineWithAuthz(context ->
+                "status/client-will".equals(context.topic())
+                        ? AuthzResult.deny(AuthzReason.NOT_AUTHORIZED)
+                        : AuthzResult.allow());
+        ClientConnection connection = connectionRegistry.open("127.0.0.1", "client-will", "MQTT", 5, true);
+
+        ConnectOutcome decision = protocolEngine.handleConnect(connection, mqtt5Connect(
+                "client-will",
+                true,
+                0L,
+                new WillMessage("status/client-will", "offline".getBytes(), MqttQoS.AT_MOST_ONCE, false)));
+
+        RejectedConnectResponse response = (RejectedConnectResponse) decision.response();
+        assertEquals(MqttConnectReturnCode.CONNECTION_REFUSED_NOT_AUTHORIZED_5, response.returnCode());
+        assertTrue(sessionRegistry.find("client-will").isEmpty());
+    }
+
+    // Verifies that authorization receives the authenticated principal established during CONNECT.
+    @Test
+    void shouldExposeAuthenticatedPrincipalToAuthzContext() {
+        AtomicReference<String> capturedPrincipal = new AtomicReference<>();
+        AuthnProvider authnProvider = (connection, request) -> AuthnResult.allow("principal-a");
+        AuthzProvider authzProvider = context -> {
+            capturedPrincipal.set(context.principal());
+            return AuthzResult.allow();
+        };
+        protocolEngine = new DefaultProtocolEngine(
+                authnProvider,
+                authzProvider,
+                sessionRegistry,
+                retainedMessageRegistry,
+                subscriptionRegistry,
+                mqttTopicSupport,
+                new NoOpBrokerEventSink(),
+                connectionRegistry,
+                clock);
+        ClientConnection connection = connectClient("client-principal", 5, true, false, 0L);
+
+        protocolEngine.handleSubscribe(connection, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 0))));
+
+        assertEquals("principal-a", connection.principal());
+        assertEquals("principal-a", capturedPrincipal.get());
+    }
+
     // Verifies that an explicit disconnect changes connection state but defers session cleanup until the socket closes.
     @Test
     void shouldKeepSessionBoundUntilConnectionActuallyCloses() {
@@ -1407,7 +1532,22 @@ class DefaultProtocolEngineTest {
 
     private DefaultProtocolEngine protocolEngineWith(SubscriptionRegistry subscriptionRegistry) {
         return new DefaultProtocolEngine(
-                new PermitAllAuthProvider(),
+                new PermitAllAuthnProvider(),
+                sessionRegistry,
+                retainedMessageRegistry,
+                subscriptionRegistry,
+                mqttTopicSupport,
+                new NoOpBrokerEventSink(),
+                connectionRegistry,
+                clock);
+    }
+
+    private DefaultProtocolEngine protocolEngineWithAuthz(AuthzAuthorizer authorizer) {
+        return new DefaultProtocolEngine(
+                new PermitAllAuthnProvider(),
+                new ConfiguredAuthzProvider(new AuthzChain(
+                        List.of(new AuthzDefinition("test", true, authorizer)),
+                        AuthzNoMatchPolicy.DENY)),
                 sessionRegistry,
                 retainedMessageRegistry,
                 subscriptionRegistry,

@@ -1,6 +1,8 @@
 package io.github.vxmqmqtt.vxmq.transport.vertx;
 
-import io.github.vxmqmqtt.vxmq.auth.AuthProvider;
+import io.github.vxmqmqtt.vxmq.authn.AuthnProvider;
+import io.github.vxmqmqtt.vxmq.authn.AuthnReason;
+import io.github.vxmqmqtt.vxmq.authn.AuthnResult;
 import io.github.vxmqmqtt.vxmq.config.BrokerRuntimeConfig;
 import io.github.vxmqmqtt.vxmq.observability.BrokerEventSink;
 import io.github.vxmqmqtt.vxmq.protocol.DefaultProtocolEngine;
@@ -21,6 +23,7 @@ import io.smallrye.mutiny.Uni;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.buffer.Buffer;
+import io.vertx.mqtt.MqttAuth;
 import io.vertx.mqtt.MqttWill;
 import io.vertx.mqtt.messages.MqttPublishMessage;
 import io.vertx.mqtt.messages.MqttSubscribeMessage;
@@ -623,19 +626,21 @@ class VertxMqttBrokerTransportTest {
         assertEquals(MqttQoS.EXACTLY_ONCE, request.willMessage().qos());
     }
 
-    // Verifies that MQTT 5 CONNECT User Property values are exposed to downstream auth providers.
+    // Verifies that MQTT 5 CONNECT User Property values are exposed to downstream authn providers.
     @Test
-    void shouldExposeMqtt5ConnectUserPropertiesToAuthProvider() throws Exception {
+    void shouldExposeMqtt5ConnectUserPropertiesToAuthnProvider() throws Exception {
         AtomicReference<ConnectRequest> capturedRequest = new AtomicReference<>();
-        AuthProvider authProvider = (connection, request) -> {
+        AuthnProvider authnProvider = (connection, request) -> {
             capturedRequest.set(request);
-            return request.properties().userProperties().values().contains(new MqttUserProperty("auth-hint", "allow"));
+            return request.properties().userProperties().values().contains(new MqttUserProperty("auth-hint", "allow"))
+                    ? AuthnResult.allow(request.username())
+                    : AuthnResult.deny(AuthnReason.NOT_AUTHORIZED);
         };
         MqttTopicSupport topicSupport = new DefaultMqttTopicSupport();
         ClientConnectionRegistry connectionRegistry = new ClientConnectionRegistry();
         DefaultProtocolEngine protocolEngine =
                 new DefaultProtocolEngine(
-                        authProvider,
+                        authnProvider,
                         new InMemorySessionRegistry(),
                         new InMemoryRetainedMessageRegistry(topicSupport),
                         new InMemorySubscriptionRegistry(topicSupport),
@@ -655,6 +660,30 @@ class VertxMqttBrokerTransportTest {
         assertNotNull(capturedRequest.get());
         assertEquals(List.of(new MqttUserProperty("auth-hint", "allow")),
                 capturedRequest.get().properties().userProperties().values());
+    }
+
+    // Verifies that MQTT username/password credentials are exposed to downstream authn providers.
+    @Test
+    void shouldExposeConnectPasswordToAuthnProvider() throws Exception {
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngineReturning(InboundPublishOutcome.rejected()),
+                new ClientConnectionRegistry(),
+                brokerEventSink());
+
+        ConnectRequest request = buildConnectRequest(
+                transport,
+                new ConnectEndpointProbe(
+                        5,
+                        null,
+                        MqttProperties.NO_PROPERTIES,
+                        new MqttAuth("device-a", "secret-a"))
+                        .endpoint());
+
+        assertEquals("device-a", request.username());
+        assertEquals("secret-a", request.password());
+        assertTrue(request.passwordPresent());
     }
 
     // Verifies that MQTT 3.1.1 will messages do not create MQTT 5 publish properties.
@@ -1244,15 +1273,25 @@ class VertxMqttBrokerTransportTest {
         private final int protocolVersion;
         private final MqttWill will;
         private final MqttProperties connectProperties;
+        private final MqttAuth auth;
 
         private ConnectEndpointProbe(int protocolVersion, MqttWill will) {
             this(protocolVersion, will, MqttProperties.NO_PROPERTIES);
         }
 
         private ConnectEndpointProbe(int protocolVersion, MqttWill will, MqttProperties connectProperties) {
+            this(protocolVersion, will, connectProperties, null);
+        }
+
+        private ConnectEndpointProbe(
+                int protocolVersion,
+                MqttWill will,
+                MqttProperties connectProperties,
+                MqttAuth auth) {
             this.protocolVersion = protocolVersion;
             this.will = will;
             this.connectProperties = connectProperties;
+            this.auth = auth;
             io.vertx.mqtt.MqttEndpoint delegate = (io.vertx.mqtt.MqttEndpoint) Proxy.newProxyInstance(
                     io.vertx.mqtt.MqttEndpoint.class.getClassLoader(),
                     new Class<?>[]{io.vertx.mqtt.MqttEndpoint.class},
@@ -1262,7 +1301,7 @@ class VertxMqttBrokerTransportTest {
                         case "protocolVersion" -> this.protocolVersion;
                         case "isCleanSession" -> true;
                         case "connectProperties" -> this.connectProperties;
-                        case "auth" -> null;
+                        case "auth" -> this.auth;
                         case "will" -> this.will;
                         case "toString" -> "ConnectEndpointProbe";
                         case "hashCode" -> System.identityHashCode(proxy);

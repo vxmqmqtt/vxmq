@@ -18,6 +18,7 @@ sequenceDiagram
     participant Client as Publisher
     participant Transport
     participant Protocol
+    participant Authz
     participant Routing
     participant Session
     participant Retained
@@ -25,6 +26,7 @@ sequenceDiagram
 
     Client->>Transport: PUBLISH / SUBSCRIBE / UNSUBSCRIBE
     Transport->>Protocol: internal request
+    Protocol->>Authz: authorize operation
     Protocol->>Session: update subscription/session state
     Protocol->>Routing: match topic or rebuild bindings
     Protocol->>Retained: update or query retained store
@@ -48,12 +50,13 @@ sequenceDiagram
 
 1. `transport` 将入站报文转换为 `PublishRequest`。
 2. `protocol` 校验 Topic Name 与当前支持的 QoS。
-3. `retain=true` 时，`protocol` 先更新 retained store。
-4. `routing` 根据 Topic Name 解析命中订阅集合。
-5. `protocol` 决定每个目标是在线立即投递、离线入队还是跳过。
-6. `transport` 查找在线 endpoint，并执行实际出站写回。
-7. QoS 1 场景下，`transport` 负责回 `PUBACK` 并接收订阅端 `PUBACK`。
-8. QoS 2 场景下，`transport` 和 `protocol/session` 协作完成 `PUBREC / PUBREL / PUBCOMP` 状态机。
+3. `authz` 检查 publish 权限；当前默认 authorizer 放行。
+4. `retain=true` 时，`protocol` 先更新 retained store。
+5. `routing` 根据 Topic Name 解析命中订阅集合。
+6. `protocol` 决定每个目标是在线立即投递、离线入队还是跳过。
+7. `transport` 查找在线 endpoint，并执行实际出站写回。
+8. QoS 1 场景下，`transport` 负责回 `PUBACK` 并接收订阅端 `PUBACK`。
+9. QoS 2 场景下，`transport` 和 `protocol/session` 协作完成 `PUBREC / PUBREL / PUBCOMP` 状态机。
 
 ### 投递规则
 
@@ -76,9 +79,10 @@ sequenceDiagram
 
 1. `transport` 接收 SUBSCRIBE 并调用 `protocol`。
 2. `protocol` 校验每个 Topic Filter 与请求 QoS。
-3. `session` 更新订阅真相，`routing` 重建或更新匹配索引。
-4. 对每个成功注册的 Topic Filter，`retained` 查询命中的 retained 消息。
-5. `transport` 先发送 SUBACK，再发送 retained deliveries。
+3. `authz` 检查 subscribe 权限；当前默认 authorizer 放行。
+4. `session` 更新订阅真相，`routing` 重建或更新匹配索引。
+5. 对每个成功注册的 Topic Filter，`retained` 查询命中的 retained 消息。
+6. `transport` 先发送 SUBACK，再发送 retained deliveries。
 
 当前行为：
 
@@ -92,6 +96,15 @@ sequenceDiagram
 - `protocol` 从会话真相和路由索引中移除对应订阅。
 - `transport` 返回按协议版本映射的 UNSUBACK。
 - MQTT 5 UNSUBSCRIBE `User Property` 会进入内部 `UnsubscribeRequest.properties`，当前仅建模供后续策略扩展使用，不改变取消订阅结果。
+
+## 鉴权边界
+
+- SUBSCRIBE 在 Topic Filter / QoS 校验之后、会话和路由状态写入之前执行鉴权。
+- PUBLISH 在 Topic Name / QoS 校验之后、retained 写入、路由匹配和 QoS 2 入站事务保存之前执行鉴权。
+- CONNECT Will 在连接接受和会话状态写入之前执行 publish 鉴权。
+- 鉴权上下文包含 `clientId`、认证后的 principal、操作类型和 topic。
+- 当前 M3-10 只接入 `AuthzProvider` / `AuthzChain`，默认 permit-all，不提供实际 ACL 规则。
+- 后续若鉴权拒绝，协议层必须避免写入订阅、路由、retained、离线队列和 QoS 2 入站事务状态。
 
 ## Topic 匹配与去重
 
@@ -135,6 +148,7 @@ sequenceDiagram
 ## Will 语义
 
 - CONNECT 携带 will 时，Broker 保存 will。
+- CONNECT Will 会在连接接受前经过 publish 鉴权；当前默认 authorizer 放行。
 - 显式 `DISCONNECT` 不触发 will。
 - 网络断开、Keep Alive 超时、协议错误断连和连接接管导致的旧连接关闭都可能触发 will。
 - will 被转换为内部 `PublishRequest`，并复用普通 `PUBLISH` 主链路。
@@ -164,4 +178,5 @@ sequenceDiagram
 - 当前支持离线 QoS 1 积压与重连恢复。
 - 当前支持 retained QoS 2 存储与重放，但 will QoS 2 延后。
 - 当前支持 Subscription Options、Subscription Identifier、CONNECT / SUBSCRIBE / UNSUBSCRIBE request properties 建模、PUBLISH / Will User Property 透传和 PUBLISH Message Expiry Interval。
+- 当前已接入 SUBSCRIBE、PUBLISH 和 CONNECT Will 鉴权链；默认 authorizer 放行，尚无实际 ACL 规则。
 - 当前不支持 CONNACK / SUBACK / UNSUBACK / DISCONNECT 等出站或非入站 request 的 User Property、共享订阅、Will Message Expiry 和除 Will User Property 外的高级 MQTT 5 will / retain 属性。

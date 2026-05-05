@@ -20,16 +20,19 @@ CONNECT 处理当前重点关注：
 - MQTT 5 `Clean Start`
 - MQTT 5 `Session Expiry Interval`
 - Keep Alive
+- 用户名 / 密码
 - 基础 Will Message
 
 ## 连接建立主线
 
 1. `transport` 接收 CONNECT 并转换为 `ConnectRequest`。
 2. `protocol` 校验协议版本、连接参数和 `clientId` 规则。
-3. `auth` 对连接执行鉴权扩展点检查；MQTT 5 CONNECT `User Property` 会随 `ConnectRequest` 提供给鉴权扩展点，当前主线默认放行。
-4. `protocol` 解析当前请求是新建会话、恢复现有会话还是接管旧连接。
-5. `session` 更新会话归属，`connectionRegistry` 更新活跃连接索引。
-6. `transport` 返回 CONNACK，并在必要时关闭旧连接。
+3. `authn` 对连接执行认证链检查；没有启用认证资源时默认放行，配置 static username/password backend 时校验用户名与密码。
+4. MQTT 5 CONNECT `User Property` 会随 `ConnectRequest` 提供给认证扩展点，供后续认证 backend 使用。
+5. 若 CONNECT 携带 will，`authz` 在会话状态写入前检查该 will topic 的 publish 权限；当前默认 authorizer 放行。
+6. `protocol` 解析当前请求是新建会话、恢复现有会话还是接管旧连接。
+7. `session` 更新会话归属，`connectionRegistry` 更新活跃连接索引。
+8. `transport` 返回 CONNACK，并在必要时关闭旧连接。
 
 ## 会话恢复语义
 
@@ -108,5 +111,5 @@ CONNECT 处理当前重点关注：
 
 - 当前实现是单机、内存态连接生命周期模型。
 - 当前已支持持久会话恢复、会话懒清理、连接接管和基础 Will Message 保存。
-- 当前不支持用户名密码鉴权和 TLS。
-- 当前不支持 `Will Delay Interval`、高级 MQTT 5 认证流程和跨重启会话恢复。
+- 当前支持配置驱动的 static username/password 认证，以及 CONNECT Will 的鉴权链接入；当前鉴权规则默认放行。
+- 当前不支持 TLS、外部认证 backend、实际 ACL 规则、`Will Delay Interval`、高级 MQTT 5 认证流程和跨重启会话恢复。
