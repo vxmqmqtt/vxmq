@@ -17,6 +17,7 @@ import io.github.vxmqmqtt.vxmq.protocol.model.ConnectProperties;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectionTakeoverPlan;
 import io.github.vxmqmqtt.vxmq.protocol.model.DeliveryPlan;
+import io.github.vxmqmqtt.vxmq.protocol.model.DisconnectAction;
 import io.github.vxmqmqtt.vxmq.protocol.model.InboundPubRelOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.InboundPublishOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.Mqtt311ConnectRequest;
@@ -36,6 +37,7 @@ import io.github.vxmqmqtt.vxmq.protocol.model.SubscribeAck;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscribeOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionItem;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionItemResult;
+import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionProperties;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeAck;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeItemResult;
@@ -439,8 +441,17 @@ public class DefaultProtocolEngine implements ProtocolEngine {
 
     @Override
     public SubscribeOutcome handleSubscribe(ClientConnection connection, SubscriptionRequest request) {
+        if (hasInvalidSubscriptionProperties(request.properties())) {
+            brokerEventSink.protocolWarning(connection, "Invalid MQTT 5 SUBSCRIBE properties");
+            return new SubscribeOutcome(
+                    new SubscribeAck(List.of()),
+                    RetainedReplayPlan.empty(),
+                    DisconnectAction.disconnect(MqttDisconnectReasonCode.PROTOCOL_ERROR));
+        }
+
         List<SubscriptionItemResult> results = new ArrayList<>();
         List<PublishDelivery> retainedDeliveries = new ArrayList<>();
+        Integer subscriptionIdentifier = request.properties().subscriptionIdentifier();
         for (SubscriptionItem item : request.items()) {
             String topicFilter = item.topicFilter();
             if (!mqttTopicSupport.isValidFilter(topicFilter)) {
@@ -481,7 +492,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                     item.noLocal(),
                     item.retainAsPublished(),
                     item.retainHandling(),
-                    item.subscriptionIdentifier());
+                    subscriptionIdentifier == null ? item.subscriptionIdentifier() : subscriptionIdentifier);
             SubscriptionBinding previousSubscription = sessionRegistry.find(connection.effectiveClientId())
                     .map(session -> session.subscription(topicFilter))
                     .orElse(null);
@@ -822,7 +833,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     private SessionOpenRequest buildSessionOpenRequest(ConnectRequest request, String connectionId) {
         // MQTT 3.1.1 and MQTT 5 share the same open/restore flow, but differ in persistence semantics.
         Long sessionExpiryIntervalSeconds = request instanceof Mqtt5ConnectRequest mqtt5Request
-                ? mqtt5Request.sessionExpiryIntervalSeconds()
+                ? effectiveSessionExpiryIntervalSeconds(mqtt5Request)
                 : null;
         return new SessionOpenRequest(
                 startsFreshSession(request),
@@ -844,13 +855,34 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         return maximumPacketSize == null ? ConnectProperties.DEFAULT_MAXIMUM_PACKET_SIZE : maximumPacketSize;
     }
 
+    private static long effectiveSessionExpiryIntervalSeconds(Mqtt5ConnectRequest request) {
+        Long sessionExpiryIntervalSeconds = request.sessionExpiryIntervalSeconds();
+        return sessionExpiryIntervalSeconds == null ? 0L : sessionExpiryIntervalSeconds;
+    }
+
     private static boolean hasInvalidConnectProperties(ConnectRequest request) {
         if (!request.isMqtt5()) {
             return false;
         }
         ConnectProperties properties = request.properties();
-        return Integer.valueOf(0).equals(properties.receiveMaximum())
-                || Integer.valueOf(0).equals(properties.maximumPacketSize());
+        return isInvalidReceiveMaximum(properties.receiveMaximum())
+                || isInvalidMaximumPacketSize(properties.maximumPacketSize());
+    }
+
+    private static boolean isInvalidReceiveMaximum(Integer receiveMaximum) {
+        return receiveMaximum != null
+                && (receiveMaximum < 1 || receiveMaximum > ConnectProperties.DEFAULT_RECEIVE_MAXIMUM);
+    }
+
+    private static boolean isInvalidMaximumPacketSize(Integer maximumPacketSize) {
+        return maximumPacketSize != null
+                && (maximumPacketSize < 1 || maximumPacketSize > ConnectProperties.DEFAULT_MAXIMUM_PACKET_SIZE);
+    }
+
+    private static boolean hasInvalidSubscriptionProperties(SubscriptionProperties properties) {
+        Integer subscriptionIdentifier = properties.subscriptionIdentifier();
+        return properties.duplicateSubscriptionIdentifier()
+                || (subscriptionIdentifier != null && subscriptionIdentifier < 1);
     }
 
     private String resolveClientId(ConnectRequest request) {
@@ -968,7 +1000,8 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             return !mqtt311Request.cleanSession();
         }
         if (request instanceof Mqtt5ConnectRequest mqtt5Request) {
-            return mqtt5Request.sessionExpiryIntervalSeconds() > 0;
+            Long sessionExpiryIntervalSeconds = mqtt5Request.sessionExpiryIntervalSeconds();
+            return sessionExpiryIntervalSeconds != null && sessionExpiryIntervalSeconds > 0;
         }
         return false;
     }

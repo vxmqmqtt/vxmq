@@ -39,6 +39,20 @@ class ConnectRequestTest {
     }
 
     @Test
+    void shouldModelAbsentMqtt5SessionExpiry() {
+        Mqtt5ConnectRequest request = new Mqtt5ConnectRequest(
+                "client-5",
+                "MQTT",
+                false,
+                null,
+                null,
+                false,
+                null);
+
+        assertNull(request.sessionExpiryIntervalSeconds());
+    }
+
+    @Test
     void shouldModelUsernameAndPassword() {
         ConnectRequest request = new Mqtt5ConnectRequest(
                 "client-auth",

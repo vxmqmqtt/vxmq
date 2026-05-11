@@ -29,6 +29,7 @@ import io.github.vxmqmqtt.vxmq.protocol.model.SessionResumeAction;
 import io.github.vxmqmqtt.vxmq.protocol.model.SessionResumePlan;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscribeOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionItem;
+import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionProperties;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeAck;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeRequest;
@@ -193,9 +194,17 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                                     subscriptionOption(subscription).isNoLocal(),
                                     subscriptionOption(subscription).isRetainAsPublished(),
                                     subscriptionOption(subscription).retainHandling(),
-                                    subscriptionIdentifier(subscribe.properties())))
+                                    null))
                             .collect(Collectors.toList()),
-                    userProperties(connection.protocolVersion(), subscribe.properties())));
+                    new SubscriptionProperties(
+                            userProperties(connection.protocolVersion(), subscribe.properties()),
+                            subscriptionIdentifier(connection.protocolVersion(), subscribe.properties()),
+                            duplicateSubscriptionIdentifier(connection.protocolVersion(), subscribe.properties()))));
+
+            if (subscribeResult.disconnectAction().isDisconnect()) {
+                disconnectForInvalidPublish(connection, endpoint, subscribeResult.disconnectAction().reasonCode());
+                return;
+            }
 
             if (connection.protocolVersion() == 5) {
                 endpoint.subscribeAcknowledge(
@@ -531,17 +540,17 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
         return auth != null && auth.getPassword() != null;
     }
 
-    private long sessionExpiryIntervalSeconds(MqttProperties connectProperties) {
+    private Long sessionExpiryIntervalSeconds(MqttProperties connectProperties) {
         if (connectProperties == null || connectProperties.isEmpty()) {
-            return 0L;
+            return null;
         }
 
         MqttProperties.MqttProperty<?> property = connectProperties.getProperty(
                 MqttProperties.MqttPropertyType.SESSION_EXPIRY_INTERVAL.value());
         if (property == null || property.value() == null) {
-            return 0L;
+            return null;
         }
-        return ((Number) property.value()).longValue();
+        return Integer.toUnsignedLong(((Number) property.value()).intValue());
     }
 
     private Integer receiveMaximum(MqttProperties connectProperties) {
@@ -554,7 +563,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
             return null;
         }
         int value = ((Number) property.value()).intValue();
-        return value < 0 ? null : value;
+        return value;
     }
 
     private Integer maximumPacketSize(MqttProperties connectProperties) {
@@ -567,7 +576,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
             return null;
         }
         int value = ((Number) property.value()).intValue();
-        return value < 0 ? null : value;
+        return value;
     }
 
     private MqttSubscriptionOption subscriptionOption(io.vertx.mutiny.mqtt.MqttTopicSubscription subscription) {
@@ -577,16 +586,27 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                 : option;
     }
 
-    private Integer subscriptionIdentifier(MqttProperties subscribeProperties) {
-        if (subscribeProperties == null) {
+    private Integer subscriptionIdentifier(int protocolVersion, MqttProperties subscribeProperties) {
+        if (protocolVersion != 5 || subscribeProperties == null) {
             return null;
         }
-        MqttProperties.MqttProperty<?> property = subscribeProperties.getProperty(
+        List<? extends MqttProperties.MqttProperty> properties = subscribeProperties.getProperties(
                 MqttProperties.MqttPropertyType.SUBSCRIPTION_IDENTIFIER.value());
+        if (properties.isEmpty()) {
+            return null;
+        }
+        MqttProperties.MqttProperty<?> property = properties.getFirst();
         if (property == null || property.value() == null) {
             return null;
         }
         return ((Number) property.value()).intValue();
+    }
+
+    private boolean duplicateSubscriptionIdentifier(int protocolVersion, MqttProperties subscribeProperties) {
+        return protocolVersion == 5
+                && subscribeProperties != null
+                && subscribeProperties.getProperties(
+                        MqttProperties.MqttPropertyType.SUBSCRIPTION_IDENTIFIER.value()).size() > 1;
     }
 
     private WillMessage willMessage(int protocolVersion, MqttWill will) {

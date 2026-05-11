@@ -22,12 +22,6 @@ public record ConnectProperties(MqttUserProperties userProperties, Integer recei
 
     public ConnectProperties {
         userProperties = userProperties == null ? MqttUserProperties.empty() : userProperties;
-        if (receiveMaximum != null && (receiveMaximum < 0 || receiveMaximum > DEFAULT_RECEIVE_MAXIMUM)) {
-            throw new IllegalArgumentException("receiveMaximum must be between 0 and 65535");
-        }
-        if (maximumPacketSize != null && (maximumPacketSize < 0 || maximumPacketSize > DEFAULT_MAXIMUM_PACKET_SIZE)) {
-            throw new IllegalArgumentException("maximumPacketSize must be between 0 and 268435455");
-        }
     }
 
     public static ConnectProperties empty() {

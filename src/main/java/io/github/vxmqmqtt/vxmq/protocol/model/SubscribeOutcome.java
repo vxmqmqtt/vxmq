@@ -5,5 +5,10 @@ package io.github.vxmqmqtt.vxmq.protocol.model;
  */
 public record SubscribeOutcome(
         SubscribeAck ack,
-        RetainedReplayPlan retainedReplayPlan) {
+        RetainedReplayPlan retainedReplayPlan,
+        DisconnectAction disconnectAction) {
+
+    public SubscribeOutcome(SubscribeAck ack, RetainedReplayPlan retainedReplayPlan) {
+        this(ack, retainedReplayPlan, DisconnectAction.none());
+    }
 }

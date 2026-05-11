@@ -43,6 +43,7 @@ import io.github.vxmqmqtt.vxmq.protocol.model.SessionResumePlan;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscribeOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionItem;
 import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.SubscriptionProperties;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeAck;
 import io.github.vxmqmqtt.vxmq.protocol.model.UnsubscribeRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.WillMessage;
@@ -841,6 +842,106 @@ class DefaultProtocolEngineTest {
         RejectedConnectResponse response = (RejectedConnectResponse) decision.response();
         assertEquals(MqttConnectReturnCode.CONNECTION_REFUSED_PROTOCOL_ERROR, response.returnCode());
         assertTrue(sessionRegistry.find("client-zero-limits").isEmpty());
+    }
+
+    // Verifies that out-of-range MQTT 5 CONNECT limits are rejected as protocol errors.
+    @Test
+    void shouldRejectOutOfRangeMqtt5ConnectLimitsAsProtocolError() {
+        ClientConnection connection = connectionRegistry.open("127.0.0.1", "client-bad-limits", "MQTT", 5, true);
+
+        ConnectOutcome decision = protocolEngine.handleConnect(connection, new Mqtt5ConnectRequest(
+                "client-bad-limits",
+                "MQTT",
+                true,
+                0L,
+                null,
+                false,
+                null,
+                new ConnectProperties(MqttUserProperties.empty(), -1, 268_435_456)));
+
+        RejectedConnectResponse response = (RejectedConnectResponse) decision.response();
+        assertEquals(MqttConnectReturnCode.CONNECTION_REFUSED_PROTOCOL_ERROR, response.returnCode());
+        assertTrue(sessionRegistry.find("client-bad-limits").isEmpty());
+    }
+
+    // Verifies that absent MQTT 5 Session Expiry is defaulted only when opening the session.
+    @Test
+    void shouldDefaultAbsentMqtt5SessionExpiryWhenOpeningSession() {
+        AtomicReference<SessionOpenRequest> capturedRequest = new AtomicReference<>();
+        sessionRegistry = new InMemorySessionRegistry() {
+            @Override
+            public io.github.vxmqmqtt.vxmq.session.SessionOpenResult openSession(
+                    String clientId,
+                    SessionOpenRequest request) {
+                capturedRequest.set(request);
+                return super.openSession(clientId, request);
+            }
+        };
+        protocolEngine = new DefaultProtocolEngine(
+                new PermitAllAuthnProvider(),
+                sessionRegistry,
+                retainedMessageRegistry,
+                subscriptionRegistry,
+                mqttTopicSupport,
+                new NoOpBrokerEventSink(),
+                connectionRegistry,
+                clock);
+        ClientConnection connection = connectionRegistry.open("127.0.0.1", "client-default-expiry", "MQTT", 5, true);
+
+        ConnectOutcome decision = protocolEngine.handleConnect(connection, new Mqtt5ConnectRequest(
+                "client-default-expiry",
+                "MQTT",
+                true,
+                null,
+                null,
+                false,
+                null,
+                ConnectProperties.empty()));
+
+        assertTrue(decision.response() instanceof AcceptedConnectResponse);
+        assertNotNull(capturedRequest.get());
+        assertEquals(0L, capturedRequest.get().sessionExpiryIntervalSeconds());
+    }
+
+    // Verifies that the MQTT 5 maximum Session Expiry Interval is kept as a positive long.
+    @Test
+    void shouldKeepSessionWithMaximumMqtt5SessionExpiryAfterClose() {
+        ClientConnection connection = connectClient("client-max-expiry", 5, false, false, 0xFFFF_FFFFL);
+
+        protocolEngine.handleConnectionClosed(connection);
+
+        assertTrue(sessionRegistry.find("client-max-expiry").isPresent());
+        assertNull(sessionRegistry.find("client-max-expiry").orElseThrow().connectionId());
+        assertEquals(0xFFFF_FFFFL,
+                sessionRegistry.find("client-max-expiry").orElseThrow().sessionExpiryIntervalSeconds());
+    }
+
+    // Verifies that MQTT 5 SUBSCRIBE Subscription Identifier 0 is a protocol error.
+    @Test
+    void shouldDisconnectOnZeroSubscriptionIdentifier() {
+        ClientConnection connection = connectClient("subscriber-zero-identifier", 5, true, false, 0L);
+
+        SubscribeOutcome outcome = protocolEngine.handleSubscribe(connection, new SubscriptionRequest(
+                List.of(new SubscriptionItem("sensors/+/temperature", 1)),
+                new SubscriptionProperties(MqttUserProperties.empty(), 0)));
+
+        assertTrue(outcome.disconnectAction().isDisconnect());
+        assertEquals(MqttDisconnectReasonCode.PROTOCOL_ERROR, outcome.disconnectAction().reasonCode());
+        assertTrue(subscriptionRegistry.match("sensors/room-1/temperature").isEmpty());
+    }
+
+    // Verifies that duplicated MQTT 5 SUBSCRIBE Subscription Identifier is a protocol error.
+    @Test
+    void shouldDisconnectOnDuplicatedSubscriptionIdentifier() {
+        ClientConnection connection = connectClient("subscriber-duplicate-identifier", 5, true, false, 0L);
+
+        SubscribeOutcome outcome = protocolEngine.handleSubscribe(connection, new SubscriptionRequest(
+                List.of(new SubscriptionItem("sensors/+/temperature", 1)),
+                new SubscriptionProperties(MqttUserProperties.empty(), 42, true)));
+
+        assertTrue(outcome.disconnectAction().isDisconnect());
+        assertEquals(MqttDisconnectReasonCode.PROTOCOL_ERROR, outcome.disconnectAction().reasonCode());
+        assertTrue(subscriptionRegistry.match("sensors/room-1/temperature").isEmpty());
     }
 
     // Verifies that inbound QoS 2 Receive Maximum is enforced for different packet ids.
