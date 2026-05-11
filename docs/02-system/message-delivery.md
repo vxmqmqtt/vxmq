@@ -120,6 +120,7 @@ sequenceDiagram
 - 订阅端收到 QoS 1 消息后，由 MQTT 客户端库自动回 `PUBACK`。
 - Broker 在收到 `PUBACK` 后完成对应 inflight 确认。
 - MQTT 5 出站 QoS 1 会遵守订阅端 CONNECT 中的 `Receive Maximum`；窗口已满时进入会话内 pending 队列，收到 `PUBACK` 后继续下发。
+- MQTT 5 出站 QoS 1 会遵守订阅端 CONNECT 中的 `Maximum Packet Size`；包大小超过订阅端限制时跳过投递，不创建 inflight。
 - 若连接先关闭，则未确认 inflight 消息回退为离线队列。
 - 当前不做后台超时重试。
 
@@ -134,6 +135,7 @@ sequenceDiagram
 - 重复或未知 `PUBREL` 会返回 `PUBCOMP`，但不会重复投递。
 - 在线 QoS 2 出站消息会进入目标会话 inflight 状态；订阅端 `PUBREC` 后 Broker 发送 `PUBREL`，订阅端 `PUBCOMP` 后清理 inflight。
 - MQTT 5 出站 QoS 2 同样遵守订阅端 `Receive Maximum`；窗口已满时进入 pending 队列，收到 `PUBCOMP` 后继续下发。
+- MQTT 5 出站 QoS 2 同样遵守订阅端 `Maximum Packet Size`；包大小超过订阅端限制时跳过投递，不创建 inflight。
 - 持久会话断线时，未完成的出站 QoS 2 状态会保留；重连后按阶段重发 `PUBLISH(dup=true)` 或 `PUBREL`。
 - 离线持久会话的 QoS 2 消息会排队，并在重连后转换为出站 QoS 2 inflight。
 - 当前不做后台超时重试，也不做跨 Broker 进程重启恢复。

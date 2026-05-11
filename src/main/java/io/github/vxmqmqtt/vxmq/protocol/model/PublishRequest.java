@@ -10,7 +10,8 @@ public record PublishRequest(
         boolean retain,
         boolean duplicate,
         byte[] payload,
-        PublishProperties properties) {
+        PublishProperties properties,
+        int packetSize) {
 
     public PublishRequest(
             String topicName,
@@ -22,8 +23,30 @@ public record PublishRequest(
         this(topicName, packetId, qos, retain, duplicate, payload, PublishProperties.empty());
     }
 
+    public PublishRequest(
+            String topicName,
+            int packetId,
+            int qos,
+            boolean retain,
+            boolean duplicate,
+            byte[] payload,
+            PublishProperties properties) {
+        this(
+                topicName,
+                packetId,
+                qos,
+                retain,
+                duplicate,
+                payload,
+                properties,
+                MqttPacketSizeEstimator.publishPacketSize(topicName, payload == null ? 0 : payload.length, qos, properties));
+    }
+
     public PublishRequest {
         properties = properties == null ? PublishProperties.empty() : properties;
+        if (packetSize < 0) {
+            throw new IllegalArgumentException("packetSize must not be negative");
+        }
     }
 
     /**

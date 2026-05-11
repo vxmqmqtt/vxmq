@@ -450,6 +450,7 @@ class VertxMqttBrokerTransportTest {
         assertEquals(
                 List.of(new MqttUserProperty("trace", "a"), new MqttUserProperty("trace", "b")),
                 capturedRequest.get().properties().userProperties().values());
+        assertTrue(capturedRequest.get().packetSize() > capturedRequest.get().payloadSize());
     }
 
     // Verifies that MQTT 5 inbound PUBLISH Message Expiry Interval is passed to the protocol engine.
@@ -713,6 +714,27 @@ class VertxMqttBrokerTransportTest {
                 new ConnectEndpointProbe(5, null, connectProperties).endpoint());
 
         assertEquals(3, request.properties().receiveMaximum());
+    }
+
+    // Verifies that MQTT 5 CONNECT Maximum Packet Size is exposed to the protocol engine.
+    @Test
+    void shouldMapMqtt5ConnectMaximumPacketSize() throws Exception {
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngineReturning(InboundPublishOutcome.rejected()),
+                new ClientConnectionRegistry(),
+                brokerEventSink());
+        MqttProperties connectProperties = new MqttProperties();
+        connectProperties.add(new MqttProperties.IntegerProperty(
+                MqttProperties.MqttPropertyType.MAXIMUM_PACKET_SIZE.value(),
+                128));
+
+        ConnectRequest request = buildConnectRequest(
+                transport,
+                new ConnectEndpointProbe(5, null, connectProperties).endpoint());
+
+        assertEquals(128, request.properties().maximumPacketSize());
     }
 
     // Verifies that MQTT username/password credentials are exposed to downstream authn providers.

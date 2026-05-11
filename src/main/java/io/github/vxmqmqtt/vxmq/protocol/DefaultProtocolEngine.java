@@ -20,9 +20,11 @@ import io.github.vxmqmqtt.vxmq.protocol.model.InboundPubRelOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.InboundPublishOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.Mqtt311ConnectRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.Mqtt5ConnectRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.MqttPacketSizeEstimator;
 import io.github.vxmqmqtt.vxmq.protocol.model.OutboundPubRecOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishAcknowledgement;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishDelivery;
+import io.github.vxmqmqtt.vxmq.protocol.model.PublishProperties;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.RejectedConnectResponse;
 import io.github.vxmqmqtt.vxmq.protocol.model.ReplayPubRel;
@@ -89,6 +91,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     private final ClientConnectionRegistry connectionRegistry;
     private final Clock clock;
     private final int brokerReceiveMaximum;
+    private final int brokerMaximumPacketSize;
 
     public DefaultProtocolEngine(
             AuthnProvider authnProvider,
@@ -131,7 +134,8 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 brokerEventSink,
                 connectionRegistry,
                 Clock.systemUTC(),
-                receiveMaximum(brokerRuntimeConfig));
+                receiveMaximum(brokerRuntimeConfig),
+                maximumPacketSize(brokerRuntimeConfig));
     }
 
     public DefaultProtocolEngine(
@@ -152,7 +156,8 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 brokerEventSink,
                 connectionRegistry,
                 clock,
-                65_535);
+                65_535,
+                268_435_455);
     }
 
     public DefaultProtocolEngine(
@@ -167,6 +172,30 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             int brokerReceiveMaximum) {
         this(
                 authnProvider,
+                sessionRegistry,
+                retainedMessageRegistry,
+                subscriptionRegistry,
+                mqttTopicSupport,
+                brokerEventSink,
+                connectionRegistry,
+                clock,
+                brokerReceiveMaximum,
+                268_435_455);
+    }
+
+    public DefaultProtocolEngine(
+            AuthnProvider authnProvider,
+            SessionRegistry sessionRegistry,
+            RetainedMessageRegistry retainedMessageRegistry,
+            SubscriptionRegistry subscriptionRegistry,
+            MqttTopicSupport mqttTopicSupport,
+            BrokerEventSink brokerEventSink,
+            ClientConnectionRegistry connectionRegistry,
+            Clock clock,
+            int brokerReceiveMaximum,
+            int brokerMaximumPacketSize) {
+        this(
+                authnProvider,
                 new PermitAllAuthzProvider(),
                 sessionRegistry,
                 retainedMessageRegistry,
@@ -175,7 +204,8 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 brokerEventSink,
                 connectionRegistry,
                 clock,
-                brokerReceiveMaximum);
+                brokerReceiveMaximum,
+                brokerMaximumPacketSize);
     }
 
     public DefaultProtocolEngine(
@@ -198,7 +228,8 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 brokerEventSink,
                 connectionRegistry,
                 clock,
-                65_535);
+                65_535,
+                268_435_455);
     }
 
     public DefaultProtocolEngine(
@@ -214,6 +245,32 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             int brokerReceiveMaximum) {
         this(
                 authnProvider,
+                authzChain,
+                sessionRegistry,
+                retainedMessageRegistry,
+                subscriptionRegistry,
+                mqttTopicSupport,
+                brokerEventSink,
+                connectionRegistry,
+                clock,
+                brokerReceiveMaximum,
+                268_435_455);
+    }
+
+    public DefaultProtocolEngine(
+            AuthnProvider authnProvider,
+            AuthzChain authzChain,
+            SessionRegistry sessionRegistry,
+            RetainedMessageRegistry retainedMessageRegistry,
+            SubscriptionRegistry subscriptionRegistry,
+            MqttTopicSupport mqttTopicSupport,
+            BrokerEventSink brokerEventSink,
+            ClientConnectionRegistry connectionRegistry,
+            Clock clock,
+            int brokerReceiveMaximum,
+            int brokerMaximumPacketSize) {
+        this(
+                authnProvider,
                 authzChain == null
                         ? new PermitAllAuthzProvider()
                         : new ConfiguredAuthzProvider(authzChain),
@@ -224,7 +281,8 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 brokerEventSink,
                 connectionRegistry,
                 clock,
-                brokerReceiveMaximum);
+                brokerReceiveMaximum,
+                brokerMaximumPacketSize);
     }
 
     public DefaultProtocolEngine(
@@ -247,7 +305,8 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 brokerEventSink,
                 connectionRegistry,
                 clock,
-                65_535);
+                65_535,
+                268_435_455);
     }
 
     public DefaultProtocolEngine(
@@ -261,6 +320,32 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             ClientConnectionRegistry connectionRegistry,
             Clock clock,
             int brokerReceiveMaximum) {
+        this(
+                authnProvider,
+                authzProvider,
+                sessionRegistry,
+                retainedMessageRegistry,
+                subscriptionRegistry,
+                mqttTopicSupport,
+                brokerEventSink,
+                connectionRegistry,
+                clock,
+                brokerReceiveMaximum,
+                268_435_455);
+    }
+
+    public DefaultProtocolEngine(
+            AuthnProvider authnProvider,
+            AuthzProvider authzProvider,
+            SessionRegistry sessionRegistry,
+            RetainedMessageRegistry retainedMessageRegistry,
+            SubscriptionRegistry subscriptionRegistry,
+            MqttTopicSupport mqttTopicSupport,
+            BrokerEventSink brokerEventSink,
+            ClientConnectionRegistry connectionRegistry,
+            Clock clock,
+            int brokerReceiveMaximum,
+            int brokerMaximumPacketSize) {
         this.authnProvider = authnProvider;
         this.authzProvider = authzProvider == null
                 ? new PermitAllAuthzProvider()
@@ -273,6 +358,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         this.connectionRegistry = connectionRegistry;
         this.clock = clock == null ? Clock.systemUTC() : clock;
         this.brokerReceiveMaximum = validateReceiveMaximum(brokerReceiveMaximum);
+        this.brokerMaximumPacketSize = validateMaximumPacketSize(brokerMaximumPacketSize);
     }
 
     @Override
@@ -461,6 +547,11 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             return InboundPublishOutcome.rejectedWithDisconnect(MqttDisconnectReasonCode.QOS_NOT_SUPPORTED);
         }
 
+        if (connection.protocolVersion() == 5 && request.packetSize() > brokerMaximumPacketSize) {
+            brokerEventSink.protocolWarning(connection, "Rejected publish over maximum packet size");
+            return InboundPublishOutcome.rejectedWithDisconnect(MqttDisconnectReasonCode.PACKET_TOO_LARGE);
+        }
+
         AuthzResult authzResult = authzProvider.authorize(new AuthzContext(
                 connection,
                 connection.effectiveClientId(),
@@ -528,7 +619,8 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             boolean deliveryRetain = binding.retainAsPublished() && request.retain();
             boolean online = connectionRegistry.findActiveConnectionId(binding.clientId()).isPresent();
             if (deliveryQos == MqttQoS.AT_MOST_ONCE) {
-                if (online) {
+                if (online && canSendPublish(binding.clientId(), request.topicName(), request.payload(), deliveryQos,
+                        deliveryRetain, false, request.properties(), binding.subscriptionIdentifiers())) {
                     deliveries.add(new PublishDelivery(
                             binding.clientId(),
                             request.topicName(),
@@ -545,6 +637,10 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             }
 
             if (online) {
+                if (!canSendPublish(binding.clientId(), request.topicName(), request.payload(), deliveryQos,
+                        deliveryRetain, false, request.properties(), binding.subscriptionIdentifiers())) {
+                    continue;
+                }
                 InflightMessage inflightMessage = sessionRegistry.createInflightMessage(
                                 binding.clientId(),
                                 request.topicName(),
@@ -610,7 +706,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         }
 
         Instant now = clock.instant();
-        List<InflightMessage> drainedMessages = sessionRegistry.drainQueuedMessages(connection.effectiveClientId(), now);
+        List<InflightMessage> drainedMessages = drainQueuedMessagesForResume(connection.effectiveClientId(), now);
         List<Integer> drainedPacketIds = drainedMessages.stream()
                 .map(InflightMessage::packetId)
                 .toList();
@@ -625,11 +721,13 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 actions.add(new ReplayPubRel(inflightMessage.packetId()));
             } else if (inflightMessage.properties().messageExpiry().isExpired(now)) {
                 sessionRegistry.completeOutboundQos2(connection.effectiveClientId(), inflightMessage.packetId());
+            } else if (!canSendPublish(connection.effectiveClientId(), inflightMessage)) {
+                clearOutboundInflight(connection.effectiveClientId(), inflightMessage);
             } else {
                 actions.add(new ReplayPublish(toPublishDelivery(connection.effectiveClientId(), inflightMessage)));
             }
         }
-        sessionRegistry.drainPendingOutboundMessages(connection.effectiveClientId(), now)
+        drainPendingInflight(connection.effectiveClientId(), now)
                 .stream()
                 .map(inflightMessage -> new ReplayPublish(toPublishDelivery(connection.effectiveClientId(), inflightMessage)))
                 .forEach(actions::add);
@@ -725,7 +823,8 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 sessionExpiryIntervalSeconds,
                 connectionId,
                 request.willMessage(),
-                request.properties().receiveMaximum());
+                request.properties().receiveMaximum(),
+                request.properties().maximumPacketSize());
     }
 
     private String resolveClientId(ConnectRequest request) {
@@ -764,6 +863,9 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         properties.add(new MqttProperties.IntegerProperty(
                 MqttProperties.MqttPropertyType.RECEIVE_MAXIMUM.value(),
                 brokerReceiveMaximum));
+        properties.add(new MqttProperties.IntegerProperty(
+                MqttProperties.MqttPropertyType.MAXIMUM_PACKET_SIZE.value(),
+                brokerMaximumPacketSize));
         return properties;
     }
 
@@ -903,6 +1005,11 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             }
             MqttQoS deliveryQos = grantedDeliveryQos(retainedMessage.qos().value(), subscriptionBinding.grantedQos());
             if (deliveryQos == MqttQoS.AT_MOST_ONCE) {
+                if (!canSendPublish(subscriptionBinding.clientId(), retainedMessage.topicName(),
+                        retainedMessage.payloadCopy(), MqttQoS.AT_MOST_ONCE, true, false,
+                        retainedMessage.properties(), subscriptionBinding.subscriptionIdentifiers())) {
+                    continue;
+                }
                 deliveries.add(new PublishDelivery(
                         subscriptionBinding.clientId(),
                         retainedMessage.topicName(),
@@ -917,6 +1024,11 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 continue;
             }
 
+            if (!canSendPublish(subscriptionBinding.clientId(), retainedMessage.topicName(),
+                    retainedMessage.payloadCopy(), deliveryQos, true, false,
+                    retainedMessage.properties(), subscriptionBinding.subscriptionIdentifiers())) {
+                continue;
+            }
             InflightMessage inflightMessage = sessionRegistry.createInflightMessage(
                             subscriptionBinding.clientId(),
                             retainedMessage.topicName(),
@@ -945,11 +1057,45 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     }
 
     private DeliveryPlan drainPendingDeliveries(String clientId) {
-        List<PublishDelivery> deliveries = sessionRegistry.drainPendingOutboundMessages(clientId, clock.instant())
+        List<PublishDelivery> deliveries = drainPendingInflight(clientId, clock.instant())
                 .stream()
                 .map(inflightMessage -> toPublishDelivery(clientId, inflightMessage))
                 .toList();
         return deliveries.isEmpty() ? DeliveryPlan.empty() : DeliveryPlan.of(deliveries, 0);
+    }
+
+    private List<InflightMessage> drainQueuedMessagesForResume(String clientId, Instant now) {
+        List<InflightMessage> deliverable = new ArrayList<>();
+        while (true) {
+            List<InflightMessage> drained = sessionRegistry.drainQueuedMessages(clientId, now);
+            if (drained.isEmpty()) {
+                return deliverable;
+            }
+            for (InflightMessage inflightMessage : drained) {
+                if (canSendPublish(clientId, inflightMessage)) {
+                    deliverable.add(inflightMessage);
+                } else {
+                    clearOutboundInflight(clientId, inflightMessage);
+                }
+            }
+        }
+    }
+
+    private List<InflightMessage> drainPendingInflight(String clientId, Instant now) {
+        List<InflightMessage> deliverable = new ArrayList<>();
+        while (true) {
+            List<InflightMessage> drained = sessionRegistry.drainPendingOutboundMessages(clientId, now);
+            if (drained.isEmpty()) {
+                return deliverable;
+            }
+            for (InflightMessage inflightMessage : drained) {
+                if (canSendPublish(clientId, inflightMessage)) {
+                    deliverable.add(inflightMessage);
+                } else {
+                    clearOutboundInflight(clientId, inflightMessage);
+                }
+            }
+        }
     }
 
     private PublishDelivery toPublishDelivery(String clientId, InflightMessage inflightMessage) {
@@ -964,6 +1110,51 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 inflightMessage.fromOfflineQueue(),
                 inflightMessage.properties(),
                 inflightMessage.subscriptionIdentifiers());
+    }
+
+    private boolean canSendPublish(String clientId, InflightMessage inflightMessage) {
+        return canSendPublish(
+                clientId,
+                inflightMessage.topicName(),
+                inflightMessage.payload(),
+                inflightMessage.qos(),
+                inflightMessage.retain(),
+                inflightMessage.duplicate(),
+                inflightMessage.properties(),
+                inflightMessage.subscriptionIdentifiers());
+    }
+
+    private boolean canSendPublish(
+            String clientId,
+            String topicName,
+            byte[] payload,
+            MqttQoS qos,
+            boolean retain,
+            boolean duplicate,
+            PublishProperties properties,
+            List<Integer> subscriptionIdentifiers) {
+        ClientSession session = sessionRegistry.find(clientId).orElse(null);
+        if (session == null) {
+            return true;
+        }
+        int propertiesSize = MqttPacketSizeEstimator.publishPropertiesSize(properties)
+                + MqttPacketSizeEstimator.subscriptionIdentifiersPropertiesSize(subscriptionIdentifiers);
+        int packetSize = MqttPacketSizeEstimator.publishPacketSize(
+                topicName,
+                payload == null ? 0 : payload.length,
+                qos.value(),
+                propertiesSize);
+        return packetSize <= session.maximumPacketSize();
+    }
+
+    private void clearOutboundInflight(String clientId, InflightMessage inflightMessage) {
+        if (inflightMessage.qos() == MqttQoS.AT_LEAST_ONCE) {
+            sessionRegistry.acknowledge(clientId, inflightMessage.packetId());
+            return;
+        }
+        if (inflightMessage.qos() == MqttQoS.EXACTLY_ONCE) {
+            sessionRegistry.completeOutboundQos2(clientId, inflightMessage.packetId());
+        }
     }
 
     private byte[] copyPayload(byte[] payload) {
@@ -982,11 +1173,22 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         return config == null ? 65_535 : validateReceiveMaximum(config.receiveMaximum());
     }
 
+    private static int maximumPacketSize(BrokerRuntimeConfig config) {
+        return config == null ? 268_435_455 : validateMaximumPacketSize(config.maxMessageSize());
+    }
+
     private static int validateReceiveMaximum(int receiveMaximum) {
         if (receiveMaximum < 1 || receiveMaximum > 65_535) {
             throw new IllegalArgumentException("receiveMaximum must be between 1 and 65535");
         }
         return receiveMaximum;
+    }
+
+    private static int validateMaximumPacketSize(int maximumPacketSize) {
+        if (maximumPacketSize < 1 || maximumPacketSize > 268_435_455) {
+            throw new IllegalArgumentException("maximumPacketSize must be between 1 and 268435455");
+        }
+        return maximumPacketSize;
     }
 
     private record PublishRoutingResult(List<PublishDelivery> deliveries, int queuedMessageCount) {

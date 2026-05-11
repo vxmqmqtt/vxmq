@@ -12,6 +12,7 @@ import io.github.vxmqmqtt.vxmq.protocol.model.InboundPubRelOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.InboundPublishOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.Mqtt311ConnectRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.Mqtt5ConnectRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.MqttPacketSizeEstimator;
 import io.github.vxmqmqtt.vxmq.protocol.model.MqttUserProperties;
 import io.github.vxmqmqtt.vxmq.protocol.model.OutboundPubRecOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishAcknowledgement;
@@ -160,7 +161,12 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                     message.isRetain(),
                     message.isDup(),
                     message.payload() == null ? null : message.payload().getBytes(),
-                    publishProperties(connection.protocolVersion(), message.properties())));
+                    publishProperties(connection.protocolVersion(), message.properties()),
+                    MqttPacketSizeEstimator.publishPacketSize(
+                            message.topicName(),
+                            message.payload() == null ? 0 : message.payload().length(),
+                            message.qosLevel().value(),
+                            publishPropertiesSize(connection.protocolVersion(), message.properties()))));
 
             if (publishOutcome.disconnectAction().isDisconnect()) {
                 disconnectForInvalidPublish(connection, endpoint, publishOutcome.disconnectAction().reasonCode());
@@ -273,7 +279,8 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                     willMessage(endpoint.protocolVersion(), endpoint.will()),
                     new ConnectProperties(
                             userProperties(endpoint.protocolVersion(), endpoint.connectProperties()),
-                            receiveMaximum(endpoint.connectProperties())));
+                            receiveMaximum(endpoint.connectProperties()),
+                            maximumPacketSize(endpoint.connectProperties())));
         }
 
         return new UnsupportedConnectRequest(
@@ -469,6 +476,10 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                 messageExpiry(protocolVersion, mqttProperties));
     }
 
+    private int publishPropertiesSize(int protocolVersion, MqttProperties mqttProperties) {
+        return MqttPacketSizeEstimator.publishPropertiesSize(publishProperties(protocolVersion, mqttProperties));
+    }
+
     private MqttUserProperties userProperties(int protocolVersion, MqttProperties mqttProperties) {
         if (protocolVersion != 5 || mqttProperties == null) {
             return MqttUserProperties.empty();
@@ -544,6 +555,19 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
         }
         int value = ((Number) property.value()).intValue();
         return value < 1 ? 65_535 : value;
+    }
+
+    private int maximumPacketSize(MqttProperties connectProperties) {
+        if (connectProperties == null || connectProperties.isEmpty()) {
+            return 268_435_455;
+        }
+        MqttProperties.MqttProperty<?> property = connectProperties.getProperty(
+                MqttProperties.MqttPropertyType.MAXIMUM_PACKET_SIZE.value());
+        if (property == null || property.value() == null) {
+            return 268_435_455;
+        }
+        int value = ((Number) property.value()).intValue();
+        return value < 1 ? 268_435_455 : value;
     }
 
     private MqttSubscriptionOption subscriptionOption(io.vertx.mutiny.mqtt.MqttTopicSubscription subscription) {

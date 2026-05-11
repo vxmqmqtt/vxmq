@@ -56,7 +56,8 @@ public class InMemorySessionRegistry implements SessionRegistry {
                     request.persistent(),
                     request.sessionExpiryIntervalSeconds(),
                     request.willMessage(),
-                    request.receiveMaximum());
+                    request.receiveMaximum(),
+                    request.maximumPacketSize());
             sessions.put(clientId, newSession);
             return new SessionOpenResult(newSession, false, clearedSession);
         }
@@ -67,7 +68,8 @@ public class InMemorySessionRegistry implements SessionRegistry {
                     request.persistent(),
                     request.sessionExpiryIntervalSeconds(),
                     request.willMessage(),
-                    request.receiveMaximum());
+                    request.receiveMaximum(),
+                    request.maximumPacketSize());
             return new SessionOpenResult(existingSession, true, clearedSession);
         }
 
@@ -77,7 +79,8 @@ public class InMemorySessionRegistry implements SessionRegistry {
                 request.persistent(),
                 request.sessionExpiryIntervalSeconds(),
                 request.willMessage(),
-                request.receiveMaximum());
+                request.receiveMaximum(),
+                request.maximumPacketSize());
         sessions.put(clientId, newSession);
         return new SessionOpenResult(newSession, false, clearedSession);
     }

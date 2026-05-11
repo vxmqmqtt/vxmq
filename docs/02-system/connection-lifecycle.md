@@ -68,7 +68,7 @@ CONNECT 处理当前重点关注：
 - CONNECT 字段合法，且协议版本在当前支持范围内。
 - `clientId` 按协议版本规则通过校验或自动分配。
 - 会话被正确新建、恢复或接管。
-- `transport` 返回正确版本的 CONNACK。
+- `transport` 返回正确版本的 CONNACK；MQTT 5 会声明当前 Broker 的 `Receive Maximum` 与 `Maximum Packet Size`。
 
 ## 失败路径
 
@@ -78,6 +78,8 @@ CONNECT 处理当前重点关注：
 - `clientId` 非法或字段违反当前支持边界：
   - MQTT 5 使用显式断连 reason code。
   - MQTT 3.1.1 直接关闭连接。
+- 入站 MQTT 5 PUBLISH 超过 Broker `Maximum Packet Size`：
+  - 返回 `DISCONNECT(PACKET_TOO_LARGE)`。
 - 发生内部异常：
   - 记录协议告警并关闭当前连接。
 

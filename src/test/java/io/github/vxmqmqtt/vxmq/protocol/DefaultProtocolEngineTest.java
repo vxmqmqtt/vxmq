@@ -174,6 +174,34 @@ class DefaultProtocolEngineTest {
         assertEquals(65_535, ((Number) property.value()).intValue());
     }
 
+    // Verifies that MQTT 5 CONNACK declares the broker Maximum Packet Size.
+    @Test
+    void shouldDeclareMaximumPacketSizeForMqtt5() {
+        protocolEngine = new DefaultProtocolEngine(
+                new PermitAllAuthnProvider(),
+                sessionRegistry,
+                retainedMessageRegistry,
+                subscriptionRegistry,
+                mqttTopicSupport,
+                new NoOpBrokerEventSink(),
+                connectionRegistry,
+                clock,
+                65_535,
+                256);
+        ClientConnection connection = connectionRegistry.open("127.0.0.1", "client-max-packet", "MQTT", 5, true);
+
+        ConnectOutcome decision = protocolEngine.handleConnect(connection, mqtt5Connect(
+                "client-max-packet",
+                true,
+                0L));
+
+        AcceptedConnectResponse response = (AcceptedConnectResponse) decision.response();
+        MqttProperties.MqttProperty<?> property = response.responseProperties()
+                .getProperty(MqttProperties.MqttPropertyType.MAXIMUM_PACKET_SIZE.value());
+        assertNotNull(property);
+        assertEquals(256, ((Number) property.value()).intValue());
+    }
+
     // Verifies that a second connection with the same client id marks the previous one as superseded.
     @Test
     void shouldMarkPreviousConnectionForTakeOver() {
@@ -689,6 +717,65 @@ class DefaultProtocolEngineTest {
         assertEquals(1, drained.deliveries().size());
         assertEquals("second", new String(drained.deliveries().getFirst().payloadCopy()));
         assertEquals(1, sessionRegistry.find("subscriber-rm-qos1").orElseThrow().inflightMessageCount());
+    }
+
+    // Verifies that inbound MQTT 5 PUBLISH packets over the broker Maximum Packet Size are rejected.
+    @Test
+    void shouldDisconnectWhenInboundPublishExceedsMaximumPacketSize() {
+        protocolEngine = new DefaultProtocolEngine(
+                new PermitAllAuthnProvider(),
+                sessionRegistry,
+                retainedMessageRegistry,
+                subscriptionRegistry,
+                mqttTopicSupport,
+                new NoOpBrokerEventSink(),
+                connectionRegistry,
+                clock,
+                65_535,
+                16);
+        ClientConnection publisher = connectClient("publisher-max-packet-inbound", 5, true, false, 0L);
+
+        InboundPublishOutcome result = protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                61,
+                1,
+                false,
+                false,
+                "payload".getBytes(),
+                PublishProperties.empty(),
+                32));
+
+        assertTrue(result.disconnectAction().isDisconnect());
+        assertEquals(MqttDisconnectReasonCode.PACKET_TOO_LARGE, result.disconnectAction().reasonCode());
+    }
+
+    // Verifies that outbound publishes over the subscriber Maximum Packet Size are skipped without inflight state.
+    @Test
+    void shouldSkipOutboundPublishWhenSubscriberMaximumPacketSizeIsExceeded() {
+        ClientConnection publisher = connectClient("publisher-max-packet-outbound", 5, true, false, 0L);
+        ClientConnection subscriber = connectClient(
+                "subscriber-max-packet-outbound",
+                5,
+                false,
+                false,
+                60L,
+                null,
+                65_535,
+                16);
+        protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 1))));
+
+        InboundPublishOutcome result = protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                62,
+                1,
+                false,
+                false,
+                "payload".getBytes()));
+
+        assertFalse(result.disconnectAction().isDisconnect());
+        assertTrue(result.deliveryPlan().deliveries().isEmpty());
+        assertEquals(0, sessionRegistry.find("subscriber-max-packet-outbound").orElseThrow().inflightMessageCount());
     }
 
     // Verifies that inbound QoS 2 Receive Maximum is enforced for different packet ids.
@@ -1598,6 +1685,26 @@ class DefaultProtocolEngineTest {
             Long sessionExpiryIntervalSeconds,
             WillMessage willMessage,
             int receiveMaximum) {
+        return connectClient(
+                clientId,
+                protocolVersion,
+                cleanSession,
+                cleanStart,
+                sessionExpiryIntervalSeconds,
+                willMessage,
+                receiveMaximum,
+                268_435_455);
+    }
+
+    private ClientConnection connectClient(
+            String clientId,
+            int protocolVersion,
+            boolean cleanSession,
+            boolean cleanStart,
+            Long sessionExpiryIntervalSeconds,
+            WillMessage willMessage,
+            int receiveMaximum,
+            int maximumPacketSize) {
         ClientConnection connection = connectionRegistry.open(
                 "127.0.0.1",
                 clientId,
@@ -1606,7 +1713,13 @@ class DefaultProtocolEngineTest {
                 protocolVersion == 4 ? cleanSession : cleanStart);
         ConnectOutcome decision = protocolEngine.handleConnect(connection, protocolVersion == 4
                 ? mqtt311Connect(clientId, cleanSession, willMessage)
-                : mqtt5Connect(clientId, cleanStart, sessionExpiryIntervalSeconds, willMessage, receiveMaximum));
+                : mqtt5Connect(
+                        clientId,
+                        cleanStart,
+                        sessionExpiryIntervalSeconds,
+                        willMessage,
+                        receiveMaximum,
+                        maximumPacketSize));
         assertTrue(decision.response() instanceof AcceptedConnectResponse);
         return connection;
     }
@@ -1637,6 +1750,16 @@ class DefaultProtocolEngineTest {
             long sessionExpiryIntervalSeconds,
             WillMessage willMessage,
             int receiveMaximum) {
+        return mqtt5Connect(clientId, cleanStart, sessionExpiryIntervalSeconds, willMessage, receiveMaximum, 268_435_455);
+    }
+
+    private ConnectRequest mqtt5Connect(
+            String clientId,
+            boolean cleanStart,
+            long sessionExpiryIntervalSeconds,
+            WillMessage willMessage,
+            int receiveMaximum,
+            int maximumPacketSize) {
         return new Mqtt5ConnectRequest(
                 clientId,
                 "MQTT",
@@ -1645,7 +1768,7 @@ class DefaultProtocolEngineTest {
                 null,
                 false,
                 willMessage,
-                new ConnectProperties(MqttUserProperties.empty(), receiveMaximum));
+                new ConnectProperties(MqttUserProperties.empty(), receiveMaximum, maximumPacketSize));
     }
 
     private PublishProperties userProperties(MqttUserProperty... userProperties) {

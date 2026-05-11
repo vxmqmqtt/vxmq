@@ -41,11 +41,12 @@ class InMemorySessionRegistryTest {
     void shouldCreatePersistentSession() {
         SessionOpenResult result = sessionRegistry.openSession(
                 "persistent-client",
-                new SessionOpenRequest(false, true, null, "connection-1", null));
+                new SessionOpenRequest(false, true, null, "connection-1", null, 65_535, 512));
 
         assertFalse(result.sessionPresent());
         assertTrue(result.session().persistent());
         assertNull(result.session().sessionExpiryIntervalSeconds());
+        assertEquals(512, result.session().maximumPacketSize());
     }
 
     // Verifies that reopening without fresh-start restores the existing session and keeps prior subscriptions.

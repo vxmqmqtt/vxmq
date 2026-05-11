@@ -35,6 +35,7 @@ public final class ClientSession {
     private final Map<Integer, InboundQos2Message> inboundQos2Messages = new LinkedHashMap<>();
     private volatile WillMessage willMessage;
     private volatile int receiveMaximum = 65_535;
+    private volatile int maximumPacketSize = 268_435_455;
     private int nextPacketId = 1;
 
     public ClientSession(String clientId) {
@@ -105,12 +106,23 @@ public final class ClientSession {
             Long newSessionExpiryIntervalSeconds,
             WillMessage newWillMessage,
             int newReceiveMaximum) {
+        activate(newConnectionId, newPersistent, newSessionExpiryIntervalSeconds, newWillMessage, newReceiveMaximum, 268_435_455);
+    }
+
+    public void activate(
+            String newConnectionId,
+            boolean newPersistent,
+            Long newSessionExpiryIntervalSeconds,
+            WillMessage newWillMessage,
+            int newReceiveMaximum,
+            int newMaximumPacketSize) {
         this.connectionId = newConnectionId;
         this.persistent = newPersistent;
         this.sessionExpiryIntervalSeconds = newSessionExpiryIntervalSeconds;
         this.expiresAt = null;
         this.willMessage = copyWillMessage(newWillMessage);
         this.receiveMaximum = newReceiveMaximum;
+        this.maximumPacketSize = newMaximumPacketSize;
     }
 
     /**
@@ -173,6 +185,10 @@ public final class ClientSession {
 
     public synchronized int pendingOutboundMessageCount() {
         return pendingOutboundMessages.size();
+    }
+
+    public int maximumPacketSize() {
+        return maximumPacketSize;
     }
 
     /**
