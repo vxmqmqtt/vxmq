@@ -53,6 +53,7 @@ import io.github.vxmqmqtt.vxmq.routing.InMemorySubscriptionRegistry;
 import io.github.vxmqmqtt.vxmq.routing.SubscriptionBinding;
 import io.github.vxmqmqtt.vxmq.routing.SubscriptionRegistry;
 import io.github.vxmqmqtt.vxmq.session.InMemorySessionRegistry;
+import io.github.vxmqmqtt.vxmq.session.SessionOpenRequest;
 import io.github.vxmqmqtt.vxmq.session.SessionRegistry;
 import io.github.vxmqmqtt.vxmq.transport.ClientConnection;
 import io.github.vxmqmqtt.vxmq.transport.ClientConnectionRegistry;
@@ -776,6 +777,70 @@ class DefaultProtocolEngineTest {
         assertFalse(result.disconnectAction().isDisconnect());
         assertTrue(result.deliveryPlan().deliveries().isEmpty());
         assertEquals(0, sessionRegistry.find("subscriber-max-packet-outbound").orElseThrow().inflightMessageCount());
+    }
+
+    // Verifies that absent client CONNECT limits are defaulted only when opening the session.
+    @Test
+    void shouldDefaultAbsentMqtt5ConnectLimitsWhenOpeningSession() {
+        AtomicReference<SessionOpenRequest> capturedRequest = new AtomicReference<>();
+        sessionRegistry = new InMemorySessionRegistry() {
+            @Override
+            public io.github.vxmqmqtt.vxmq.session.SessionOpenResult openSession(
+                    String clientId,
+                    SessionOpenRequest request) {
+                capturedRequest.set(request);
+                return super.openSession(clientId, request);
+            }
+        };
+        protocolEngine = new DefaultProtocolEngine(
+                new PermitAllAuthnProvider(),
+                sessionRegistry,
+                retainedMessageRegistry,
+                subscriptionRegistry,
+                mqttTopicSupport,
+                new NoOpBrokerEventSink(),
+                connectionRegistry,
+                clock);
+        ClientConnection connection = connectionRegistry.open("127.0.0.1", "client-default-limits", "MQTT", 5, true);
+
+        ConnectOutcome decision = protocolEngine.handleConnect(connection, new Mqtt5ConnectRequest(
+                "client-default-limits",
+                "MQTT",
+                true,
+                0L,
+                null,
+                false,
+                null,
+                new ConnectProperties(MqttUserProperties.empty(), null, null)));
+
+        assertTrue(decision.response() instanceof AcceptedConnectResponse);
+        assertNotNull(capturedRequest.get());
+        assertEquals(
+                ConnectProperties.DEFAULT_RECEIVE_MAXIMUM,
+                capturedRequest.get().receiveMaximum());
+        assertEquals(
+                ConnectProperties.DEFAULT_MAXIMUM_PACKET_SIZE,
+                capturedRequest.get().maximumPacketSize());
+    }
+
+    // Verifies that zero-valued MQTT 5 CONNECT limits are rejected as protocol errors.
+    @Test
+    void shouldRejectZeroMqtt5ConnectLimitsAsProtocolError() {
+        ClientConnection connection = connectionRegistry.open("127.0.0.1", "client-zero-limits", "MQTT", 5, true);
+
+        ConnectOutcome decision = protocolEngine.handleConnect(connection, new Mqtt5ConnectRequest(
+                "client-zero-limits",
+                "MQTT",
+                true,
+                0L,
+                null,
+                false,
+                null,
+                new ConnectProperties(MqttUserProperties.empty(), 0, 0)));
+
+        RejectedConnectResponse response = (RejectedConnectResponse) decision.response();
+        assertEquals(MqttConnectReturnCode.CONNECTION_REFUSED_PROTOCOL_ERROR, response.returnCode());
+        assertTrue(sessionRegistry.find("client-zero-limits").isEmpty());
     }
 
     // Verifies that inbound QoS 2 Receive Maximum is enforced for different packet ids.

@@ -1,6 +1,7 @@
 package io.github.vxmqmqtt.vxmq.protocol.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -79,10 +80,23 @@ class MqttUserPropertiesTest {
     @Test
     void shouldNormalizeNullPacketProperties() {
         assertTrue(new ConnectProperties(null).isEmpty());
+        assertNull(ConnectProperties.empty().receiveMaximum());
+        assertNull(ConnectProperties.empty().maximumPacketSize());
         assertTrue(new SubscriptionProperties(null).isEmpty());
         assertTrue(new UnsubscribeProperties(null).isEmpty());
         assertTrue(new PublishProperties(null).isEmpty());
         assertTrue(new PublishProperties(null, null).isEmpty());
         assertTrue(MessageExpiry.none().isEmpty());
+    }
+
+    // Verifies that explicitly provided CONNECT limits are distinct from absent properties.
+    @Test
+    void shouldTreatExplicitConnectLimitsAsPresentProperties() {
+        ConnectProperties properties = new ConnectProperties(
+                MqttUserProperties.empty(),
+                ConnectProperties.DEFAULT_RECEIVE_MAXIMUM,
+                ConnectProperties.DEFAULT_MAXIMUM_PACKET_SIZE);
+
+        assertFalse(properties.isEmpty());
     }
 }

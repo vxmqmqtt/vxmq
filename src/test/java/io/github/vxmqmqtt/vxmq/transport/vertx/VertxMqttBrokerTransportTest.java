@@ -737,6 +737,49 @@ class VertxMqttBrokerTransportTest {
         assertEquals(128, request.properties().maximumPacketSize());
     }
 
+    // Verifies that absent MQTT 5 CONNECT limits remain absent in the protocol model.
+    @Test
+    void shouldLeaveAbsentMqtt5ConnectLimitsUnset() throws Exception {
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngineReturning(InboundPublishOutcome.rejected()),
+                new ClientConnectionRegistry(),
+                brokerEventSink());
+
+        ConnectRequest request = buildConnectRequest(
+                transport,
+                new ConnectEndpointProbe(5, null, new MqttProperties()).endpoint());
+
+        assertNull(request.properties().receiveMaximum());
+        assertNull(request.properties().maximumPacketSize());
+    }
+
+    // Verifies that invalid zero-valued MQTT 5 CONNECT limits are preserved for protocol validation.
+    @Test
+    void shouldPreserveZeroMqtt5ConnectLimitsForProtocolValidation() throws Exception {
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngineReturning(InboundPublishOutcome.rejected()),
+                new ClientConnectionRegistry(),
+                brokerEventSink());
+        MqttProperties connectProperties = new MqttProperties();
+        connectProperties.add(new MqttProperties.IntegerProperty(
+                MqttProperties.MqttPropertyType.RECEIVE_MAXIMUM.value(),
+                0));
+        connectProperties.add(new MqttProperties.IntegerProperty(
+                MqttProperties.MqttPropertyType.MAXIMUM_PACKET_SIZE.value(),
+                0));
+
+        ConnectRequest request = buildConnectRequest(
+                transport,
+                new ConnectEndpointProbe(5, null, connectProperties).endpoint());
+
+        assertEquals(0, request.properties().receiveMaximum());
+        assertEquals(0, request.properties().maximumPacketSize());
+    }
+
     // Verifies that MQTT username/password credentials are exposed to downstream authn providers.
     @Test
     void shouldExposeConnectPasswordToAuthnProvider() throws Exception {

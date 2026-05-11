@@ -13,6 +13,7 @@ import io.github.vxmqmqtt.vxmq.config.BrokerRuntimeConfig;
 import io.github.vxmqmqtt.vxmq.observability.BrokerEventSink;
 import io.github.vxmqmqtt.vxmq.protocol.model.AcceptedConnectResponse;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectOutcome;
+import io.github.vxmqmqtt.vxmq.protocol.model.ConnectProperties;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectionTakeoverPlan;
 import io.github.vxmqmqtt.vxmq.protocol.model.DeliveryPlan;
@@ -368,6 +369,12 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             brokerEventSink.protocolWarning(connection, "Unsupported protocol version: " + request.protocolVersion());
             return ConnectOutcome.rejected(new RejectedConnectResponse(
                     rejectUnsupportedProtocolVersion(request),
+                    MqttProperties.NO_PROPERTIES));
+        }
+        if (hasInvalidConnectProperties(request)) {
+            brokerEventSink.protocolWarning(connection, "Invalid MQTT 5 CONNECT properties");
+            return ConnectOutcome.rejected(new RejectedConnectResponse(
+                    MqttConnectReturnCode.CONNECTION_REFUSED_PROTOCOL_ERROR,
                     MqttProperties.NO_PROPERTIES));
         }
 
@@ -823,8 +830,27 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 sessionExpiryIntervalSeconds,
                 connectionId,
                 request.willMessage(),
-                request.properties().receiveMaximum(),
-                request.properties().maximumPacketSize());
+                effectiveReceiveMaximum(request.properties()),
+                effectiveMaximumPacketSize(request.properties()));
+    }
+
+    private static int effectiveReceiveMaximum(ConnectProperties properties) {
+        Integer receiveMaximum = properties.receiveMaximum();
+        return receiveMaximum == null ? ConnectProperties.DEFAULT_RECEIVE_MAXIMUM : receiveMaximum;
+    }
+
+    private static int effectiveMaximumPacketSize(ConnectProperties properties) {
+        Integer maximumPacketSize = properties.maximumPacketSize();
+        return maximumPacketSize == null ? ConnectProperties.DEFAULT_MAXIMUM_PACKET_SIZE : maximumPacketSize;
+    }
+
+    private static boolean hasInvalidConnectProperties(ConnectRequest request) {
+        if (!request.isMqtt5()) {
+            return false;
+        }
+        ConnectProperties properties = request.properties();
+        return Integer.valueOf(0).equals(properties.receiveMaximum())
+                || Integer.valueOf(0).equals(properties.maximumPacketSize());
     }
 
     private String resolveClientId(ConnectRequest request) {

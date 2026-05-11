@@ -544,30 +544,30 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
         return ((Number) property.value()).longValue();
     }
 
-    private int receiveMaximum(MqttProperties connectProperties) {
+    private Integer receiveMaximum(MqttProperties connectProperties) {
         if (connectProperties == null || connectProperties.isEmpty()) {
-            return 65_535;
+            return null;
         }
         MqttProperties.MqttProperty<?> property = connectProperties.getProperty(
                 MqttProperties.MqttPropertyType.RECEIVE_MAXIMUM.value());
         if (property == null || property.value() == null) {
-            return 65_535;
+            return null;
         }
         int value = ((Number) property.value()).intValue();
-        return value < 1 ? 65_535 : value;
+        return value < 0 ? null : value;
     }
 
-    private int maximumPacketSize(MqttProperties connectProperties) {
+    private Integer maximumPacketSize(MqttProperties connectProperties) {
         if (connectProperties == null || connectProperties.isEmpty()) {
-            return 268_435_455;
+            return null;
         }
         MqttProperties.MqttProperty<?> property = connectProperties.getProperty(
                 MqttProperties.MqttPropertyType.MAXIMUM_PACKET_SIZE.value());
         if (property == null || property.value() == null) {
-            return 268_435_455;
+            return null;
         }
         int value = ((Number) property.value()).intValue();
-        return value < 1 ? 268_435_455 : value;
+        return value < 0 ? null : value;
     }
 
     private MqttSubscriptionOption subscriptionOption(io.vertx.mutiny.mqtt.MqttTopicSubscription subscription) {
