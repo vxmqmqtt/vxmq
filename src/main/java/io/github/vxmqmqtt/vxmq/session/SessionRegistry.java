@@ -52,6 +52,11 @@ public interface SessionRegistry {
     void enqueueOfflineMessage(String clientId, QueuedMessage queuedMessage);
 
     /**
+     * Queues one online outbound QoS 1 / QoS 2 message until the subscriber receive window opens.
+     */
+    void enqueuePendingOutboundMessage(String clientId, QueuedMessage queuedMessage);
+
+    /**
      * Converts all queued offline messages into inflight deliveries after reconnect.
      */
     List<InflightMessage> drainQueuedMessages(String clientId);
@@ -62,6 +67,11 @@ public interface SessionRegistry {
     default List<InflightMessage> drainQueuedMessages(String clientId, Instant now) {
         return drainQueuedMessages(clientId);
     }
+
+    /**
+     * Converts pending online outbound messages into inflight deliveries when receive window is available.
+     */
+    List<InflightMessage> drainPendingOutboundMessages(String clientId, Instant now);
 
     /**
      * Creates one inflight delivery for an online QoS 1 publish.
@@ -124,6 +134,11 @@ public interface SessionRegistry {
             boolean retain,
             boolean duplicate,
             PublishProperties properties);
+
+    /**
+     * Returns whether an inbound QoS 2 transaction with the supplied packet id already exists.
+     */
+    boolean hasInboundQos2Message(String clientId, int packetId);
 
     /**
      * Completes and removes an inbound QoS 2 transaction after PUBREL.

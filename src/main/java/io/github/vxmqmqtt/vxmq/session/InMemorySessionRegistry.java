@@ -55,7 +55,8 @@ public class InMemorySessionRegistry implements SessionRegistry {
                     request.connectionId(),
                     request.persistent(),
                     request.sessionExpiryIntervalSeconds(),
-                    request.willMessage());
+                    request.willMessage(),
+                    request.receiveMaximum());
             sessions.put(clientId, newSession);
             return new SessionOpenResult(newSession, false, clearedSession);
         }
@@ -65,7 +66,8 @@ public class InMemorySessionRegistry implements SessionRegistry {
                     request.connectionId(),
                     request.persistent(),
                     request.sessionExpiryIntervalSeconds(),
-                    request.willMessage());
+                    request.willMessage(),
+                    request.receiveMaximum());
             return new SessionOpenResult(existingSession, true, clearedSession);
         }
 
@@ -74,7 +76,8 @@ public class InMemorySessionRegistry implements SessionRegistry {
                 request.connectionId(),
                 request.persistent(),
                 request.sessionExpiryIntervalSeconds(),
-                request.willMessage());
+                request.willMessage(),
+                request.receiveMaximum());
         sessions.put(clientId, newSession);
         return new SessionOpenResult(newSession, false, clearedSession);
     }
@@ -134,6 +137,11 @@ public class InMemorySessionRegistry implements SessionRegistry {
     }
 
     @Override
+    public void enqueuePendingOutboundMessage(String clientId, QueuedMessage queuedMessage) {
+        sessionForMutation(clientId).enqueuePendingOutboundMessage(queuedMessage, offlineQueueCapacity);
+    }
+
+    @Override
     public List<InflightMessage> drainQueuedMessages(String clientId) {
         return find(clientId)
                 .map(ClientSession::drainQueuedMessagesToInflight)
@@ -144,6 +152,13 @@ public class InMemorySessionRegistry implements SessionRegistry {
     public List<InflightMessage> drainQueuedMessages(String clientId, Instant now) {
         return find(clientId)
                 .map(session -> session.drainQueuedMessagesToInflight(now))
+                .orElseGet(List::of);
+    }
+
+    @Override
+    public List<InflightMessage> drainPendingOutboundMessages(String clientId, Instant now) {
+        return find(clientId)
+                .map(session -> session.drainPendingOutboundMessagesToInflight(now))
                 .orElseGet(List::of);
     }
 
@@ -242,6 +257,13 @@ public class InMemorySessionRegistry implements SessionRegistry {
             PublishProperties properties) {
         return find(clientId)
                 .map(session -> session.startInboundQos2Message(packetId, topicName, payload, retain, duplicate, properties));
+    }
+
+    @Override
+    public boolean hasInboundQos2Message(String clientId, int packetId) {
+        return find(clientId)
+                .map(session -> session.hasInboundQos2Message(packetId))
+                .orElse(false);
     }
 
     @Override

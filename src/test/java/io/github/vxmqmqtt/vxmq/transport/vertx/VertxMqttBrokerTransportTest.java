@@ -34,6 +34,7 @@ import io.vertx.mutiny.mqtt.MqttEndpoint;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.Field;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -182,6 +183,37 @@ class VertxMqttBrokerTransportTest {
 
         assertTrue(probe.publishReleaseCalled);
         assertEquals(13, probe.publishReleasePacketId);
+    }
+
+    // Verifies that PUBACK drains protocol-held outbound deliveries back through the transport.
+    @Test
+    void shouldSendDrainedDeliveryAfterPubAck() throws Exception {
+        ClientConnectionRegistry connectionRegistry = new ClientConnectionRegistry();
+        ClientConnection connection = connectionRegistry.open("remote", "client-drain", "MQTT", 5, true);
+        connection.assignClientId("client-drain");
+        connectionRegistry.bindClientId("client-drain", connection.connectionId());
+        ProtocolEngine protocolEngine = protocolEngineDrainingOnPubAck(new PublishDelivery(
+                "client-drain",
+                "sensors/room-1/temperature",
+                "pending".getBytes(),
+                MqttQoS.AT_LEAST_ONCE,
+                false,
+                false,
+                77,
+                false));
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngine,
+                connectionRegistry,
+                brokerEventSink());
+        EndpointProbe probe = new EndpointProbe(5, true);
+
+        installHandlers(transport, connection, probe.endpoint());
+        registerEndpoint(transport, connection.connectionId(), probe.endpoint());
+        probe.invokePublishAcknowledgeHandler(76);
+
+        assertEquals(1, probe.publishCalledCount);
     }
 
     // Verifies that MQTT 5 SUBSCRIBE options and Subscription Identifier are passed to the protocol engine.
@@ -662,6 +694,27 @@ class VertxMqttBrokerTransportTest {
                 capturedRequest.get().properties().userProperties().values());
     }
 
+    // Verifies that MQTT 5 CONNECT Receive Maximum is exposed to the protocol engine.
+    @Test
+    void shouldMapMqtt5ConnectReceiveMaximum() throws Exception {
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngineReturning(InboundPublishOutcome.rejected()),
+                new ClientConnectionRegistry(),
+                brokerEventSink());
+        MqttProperties connectProperties = new MqttProperties();
+        connectProperties.add(new MqttProperties.IntegerProperty(
+                MqttProperties.MqttPropertyType.RECEIVE_MAXIMUM.value(),
+                3));
+
+        ConnectRequest request = buildConnectRequest(
+                transport,
+                new ConnectEndpointProbe(5, null, connectProperties).endpoint());
+
+        assertEquals(3, request.properties().receiveMaximum());
+    }
+
     // Verifies that MQTT username/password credentials are exposed to downstream authn providers.
     @Test
     void shouldExposeConnectPasswordToAuthnProvider() throws Exception {
@@ -753,6 +806,16 @@ class VertxMqttBrokerTransportTest {
         method.invoke(transport, delivery);
     }
 
+    @SuppressWarnings("unchecked")
+    private static void registerEndpoint(
+            VertxMqttBrokerTransport transport,
+            String connectionId,
+            MqttEndpoint endpoint) throws Exception {
+        Field field = VertxMqttBrokerTransport.class.getDeclaredField("endpointsByConnectionId");
+        field.setAccessible(true);
+        ((java.util.Map<String, MqttEndpoint>) field.get(transport)).put(connectionId, endpoint);
+    }
+
     private static PublishProperties userProperties(MqttUserProperty... userProperties) {
         return new PublishProperties(new MqttUserProperties(List.of(userProperties)));
     }
@@ -799,6 +862,11 @@ class VertxMqttBrokerTransportTest {
             @Override
             public int timeoutOnConnectSeconds() {
                 return 10;
+            }
+
+            @Override
+            public int receiveMaximum() {
+                return 65_535;
             }
 
             @Override
@@ -901,7 +969,8 @@ class VertxMqttBrokerTransportTest {
             }
 
             @Override
-            public void handlePubAck(ClientConnection connection, int packetId) {
+            public DeliveryPlan handlePubAck(ClientConnection connection, int packetId) {
+                return DeliveryPlan.empty();
             }
 
             @Override
@@ -915,7 +984,66 @@ class VertxMqttBrokerTransportTest {
             }
 
             @Override
-            public void handlePubComp(ClientConnection connection, int packetId) {
+            public DeliveryPlan handlePubComp(ClientConnection connection, int packetId) {
+                return DeliveryPlan.empty();
+            }
+
+            @Override
+            public void handleDisconnect(ClientConnection connection) {
+            }
+
+            @Override
+            public List<PublishDelivery> handleConnectionClosed(ClientConnection connection) {
+                return List.of();
+            }
+        };
+    }
+
+    private static ProtocolEngine protocolEngineDrainingOnPubAck(PublishDelivery delivery) {
+        return new ProtocolEngine() {
+            @Override
+            public ConnectOutcome handleConnect(ClientConnection connection, ConnectRequest request) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public SubscribeOutcome handleSubscribe(ClientConnection connection, SubscriptionRequest request) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public UnsubscribeAck handleUnsubscribe(ClientConnection connection, UnsubscribeRequest request) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public InboundPublishOutcome handlePublish(ClientConnection connection, PublishRequest request) {
+                return InboundPublishOutcome.rejected();
+            }
+
+            @Override
+            public SessionResumePlan handleSessionResume(ClientConnection connection) {
+                return SessionResumePlan.empty();
+            }
+
+            @Override
+            public DeliveryPlan handlePubAck(ClientConnection connection, int packetId) {
+                return DeliveryPlan.of(List.of(delivery), 0);
+            }
+
+            @Override
+            public InboundPubRelOutcome handlePubRel(ClientConnection connection, int packetId) {
+                return InboundPubRelOutcome.alreadyComplete();
+            }
+
+            @Override
+            public OutboundPubRecOutcome handlePubRec(ClientConnection connection, int packetId) {
+                return OutboundPubRecOutcome.send(io.vertx.mqtt.messages.codes.MqttPubRelReasonCode.SUCCESS);
+            }
+
+            @Override
+            public DeliveryPlan handlePubComp(ClientConnection connection, int packetId) {
+                return DeliveryPlan.empty();
             }
 
             @Override
@@ -960,7 +1088,8 @@ class VertxMqttBrokerTransportTest {
             }
 
             @Override
-            public void handlePubAck(ClientConnection connection, int packetId) {
+            public DeliveryPlan handlePubAck(ClientConnection connection, int packetId) {
+                return DeliveryPlan.empty();
             }
 
             @Override
@@ -974,7 +1103,8 @@ class VertxMqttBrokerTransportTest {
             }
 
             @Override
-            public void handlePubComp(ClientConnection connection, int packetId) {
+            public DeliveryPlan handlePubComp(ClientConnection connection, int packetId) {
+                return DeliveryPlan.empty();
             }
 
             @Override
@@ -1018,7 +1148,8 @@ class VertxMqttBrokerTransportTest {
             }
 
             @Override
-            public void handlePubAck(ClientConnection connection, int packetId) {
+            public DeliveryPlan handlePubAck(ClientConnection connection, int packetId) {
+                return DeliveryPlan.empty();
             }
 
             @Override
@@ -1032,7 +1163,8 @@ class VertxMqttBrokerTransportTest {
             }
 
             @Override
-            public void handlePubComp(ClientConnection connection, int packetId) {
+            public DeliveryPlan handlePubComp(ClientConnection connection, int packetId) {
+                return DeliveryPlan.empty();
             }
 
             @Override
@@ -1075,7 +1207,8 @@ class VertxMqttBrokerTransportTest {
             }
 
             @Override
-            public void handlePubAck(ClientConnection connection, int packetId) {
+            public DeliveryPlan handlePubAck(ClientConnection connection, int packetId) {
+                return DeliveryPlan.empty();
             }
 
             @Override
@@ -1089,7 +1222,8 @@ class VertxMqttBrokerTransportTest {
             }
 
             @Override
-            public void handlePubComp(ClientConnection connection, int packetId) {
+            public DeliveryPlan handlePubComp(ClientConnection connection, int packetId) {
+                return DeliveryPlan.empty();
             }
 
             @Override
@@ -1117,6 +1251,7 @@ class VertxMqttBrokerTransportTest {
         private boolean publishReceivedCalled;
         private boolean publishReleaseCalled;
         private boolean publishCompleteCalled;
+        private int publishCalledCount;
         private int publishReceivedPacketId;
         private int publishReleasePacketId;
         private int publishCompletePacketId;
@@ -1126,8 +1261,10 @@ class VertxMqttBrokerTransportTest {
         private Handler<MqttPublishMessage> publishHandler;
         private Handler<MqttSubscribeMessage> subscribeHandler;
         private Handler<MqttUnsubscribeMessage> unsubscribeHandler;
+        private Handler<Integer> publishAcknowledgeHandler;
         private Handler<Integer> publishReleaseHandler;
         private Handler<Integer> publishReceivedHandler;
+        private Handler<Integer> publishCompletionHandler;
 
         private EndpointProbe(int protocolVersion, boolean connected) {
             this.protocolVersion = protocolVersion;
@@ -1159,8 +1296,15 @@ class VertxMqttBrokerTransportTest {
                             this.publishReceivedHandler = castIntegerHandler(args[0]);
                             yield proxy;
                         }
-                        case "disconnectHandler", "publishAcknowledgeHandler",
-                             "publishCompletionHandler", "closeHandler" -> proxy;
+                        case "publishAcknowledgeHandler" -> {
+                            this.publishAcknowledgeHandler = castIntegerHandler(args[0]);
+                            yield proxy;
+                        }
+                        case "publishCompletionHandler" -> {
+                            this.publishCompletionHandler = castIntegerHandler(args[0]);
+                            yield proxy;
+                        }
+                        case "disconnectHandler", "closeHandler" -> proxy;
                         case "publishAcknowledge" -> {
                             this.publishAcknowledgeCalled = true;
                             yield proxy;
@@ -1182,6 +1326,7 @@ class VertxMqttBrokerTransportTest {
                         }
                         case "subscribeAcknowledge", "unsubscribeAcknowledge" -> proxy;
                         case "publish" -> {
+                            this.publishCalledCount++;
                             for (Object arg : args) {
                                 if (arg instanceof MqttProperties properties) {
                                     this.publishProperties = properties;
@@ -1241,6 +1386,11 @@ class VertxMqttBrokerTransportTest {
         private void invokePublishReceivedHandler(int packetId) {
             assertNotNull(publishReceivedHandler);
             publishReceivedHandler.handle(packetId);
+        }
+
+        private void invokePublishAcknowledgeHandler(int packetId) {
+            assertNotNull(publishAcknowledgeHandler);
+            publishAcknowledgeHandler.handle(packetId);
         }
 
         @SuppressWarnings("unchecked")

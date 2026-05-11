@@ -2,6 +2,7 @@ package io.github.vxmqmqtt.vxmq.protocol;
 
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.DeliveryPlan;
 import io.github.vxmqmqtt.vxmq.protocol.model.InboundPubRelOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.InboundPublishOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.OutboundPubRecOutcome;
@@ -48,7 +49,7 @@ public interface ProtocolEngine {
     /**
      * Completes one QoS 1 outbound delivery after the subscriber acknowledges it.
      */
-    void handlePubAck(ClientConnection connection, int packetId);
+    DeliveryPlan handlePubAck(ClientConnection connection, int packetId);
 
     /**
      * Completes one inbound QoS 2 publish transaction after receiving PUBREL from a publisher.
@@ -63,7 +64,7 @@ public interface ProtocolEngine {
     /**
      * Completes one outbound QoS 2 delivery after receiving PUBCOMP from a subscriber.
      */
-    void handlePubComp(ClientConnection connection, int packetId);
+    DeliveryPlan handlePubComp(ClientConnection connection, int packetId);
 
     /**
      * Handles an explicit MQTT DISCONNECT received from the client.

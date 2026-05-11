@@ -10,5 +10,21 @@ public record SessionOpenRequest(
         boolean persistent,
         Long sessionExpiryIntervalSeconds,
         String connectionId,
-        WillMessage willMessage) {
+        WillMessage willMessage,
+        int receiveMaximum) {
+
+    public SessionOpenRequest(
+            boolean startFreshSession,
+            boolean persistent,
+            Long sessionExpiryIntervalSeconds,
+            String connectionId,
+            WillMessage willMessage) {
+        this(startFreshSession, persistent, sessionExpiryIntervalSeconds, connectionId, willMessage, 65_535);
+    }
+
+    public SessionOpenRequest {
+        if (receiveMaximum < 1 || receiveMaximum > 65_535) {
+            throw new IllegalArgumentException("receiveMaximum must be between 1 and 65535");
+        }
+    }
 }

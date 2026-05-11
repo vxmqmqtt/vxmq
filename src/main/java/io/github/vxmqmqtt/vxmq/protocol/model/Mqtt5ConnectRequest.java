@@ -61,6 +61,19 @@ public record Mqtt5ConnectRequest(
             String username,
             boolean passwordPresent,
             WillMessage willMessage,
+            ConnectProperties properties) {
+        this(requestedClientId, protocolName, cleanStart, sessionExpiryIntervalSeconds, username, null, passwordPresent,
+                willMessage, properties);
+    }
+
+    public Mqtt5ConnectRequest(
+            String requestedClientId,
+            String protocolName,
+            boolean cleanStart,
+            long sessionExpiryIntervalSeconds,
+            String username,
+            boolean passwordPresent,
+            WillMessage willMessage,
             MqttUserProperties userProperties) {
         this(requestedClientId, protocolName, cleanStart, sessionExpiryIntervalSeconds, username, null, passwordPresent,
                 willMessage, new ConnectProperties(userProperties));

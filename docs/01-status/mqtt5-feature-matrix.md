@@ -37,7 +37,7 @@
 | 状态管理 | Will Delay Interval | M5 | 不适用 | 不支持 | 未开始 | MQTT 5 高级遗嘱属性 |
 | MQTT 5 属性 | User Property | M3 | 不适用 | 入站 CONNECT / SUBSCRIBE / UNSUBSCRIBE request properties 建模；PUBLISH / Will 透传 | 已验证 | 已覆盖 auth 可读取 CONNECT 属性、订阅/取消订阅 request 建模、在线投递、retained replay、离线恢复、QoS 2 延迟路由和 will 发布 |
 | MQTT 5 属性 | Message Expiry Interval | M3 | 不适用 | 支持 | 已验证 | 已覆盖在线投递、retained replay、离线恢复、QoS 2 延迟路由和出站剩余 interval；Will Message Expiry 延后 |
-| MQTT 5 属性 | Receive Maximum | M3 | 不适用 | 不支持 | 未开始 | 流控相关 |
+| MQTT 5 属性 | Receive Maximum | M3 | 不适用 | 支持 | 已验证 | CONNACK 声明 Broker receive maximum；出站 QoS 1 / QoS 2 遵守客户端窗口并 pending；入站 QoS 2 超限返回 `RECEIVE_MAXIMUM_EXCEEDED` |
 | MQTT 5 属性 | Maximum Packet Size | M3 | 不适用 | 不支持 | 未开始 | 连接协商与限制相关 |
 | MQTT 5 属性 | Topic Alias | M5 | 不适用 | 不支持 | 未开始 | 高级优化能力 |
 | MQTT 5 属性 | Response Topic / Correlation Data | M3 | 不适用 | 不支持 | 未开始 | 请求响应场景支撑 |

@@ -146,7 +146,7 @@ class InMemorySessionRegistryTest {
     void shouldCreateAndAcknowledgeInflightDelivery() {
         sessionRegistry.openSession(
                 "inflight-client",
-                new SessionOpenRequest(false, true, null, "connection-1", null));
+                new SessionOpenRequest(false, true, null, "connection-1", null, 1));
 
         InflightMessage inflightMessage = sessionRegistry.createInflightMessage(
                         "inflight-client",
@@ -159,8 +159,23 @@ class InMemorySessionRegistryTest {
                 .orElseThrow();
 
         assertEquals(1, sessionRegistry.find("inflight-client").orElseThrow().inflightMessageCount());
+        assertTrue(sessionRegistry.createInflightMessage(
+                "inflight-client",
+                "sensors/room-1/temperature",
+                "blocked".getBytes(),
+                MqttQoS.AT_LEAST_ONCE,
+                false,
+                false,
+                false).isEmpty());
+        sessionRegistry.enqueuePendingOutboundMessage("inflight-client", new QueuedMessage(
+                "sensors/room-1/temperature",
+                "pending".getBytes(),
+                MqttQoS.AT_LEAST_ONCE,
+                false,
+                false));
         assertTrue(sessionRegistry.acknowledge("inflight-client", inflightMessage.packetId()));
-        assertEquals(0, sessionRegistry.find("inflight-client").orElseThrow().inflightMessageCount());
+        assertEquals(1, sessionRegistry.drainPendingOutboundMessages("inflight-client", Instant.now()).size());
+        assertEquals(1, sessionRegistry.find("inflight-client").orElseThrow().inflightMessageCount());
     }
 
     // Verifies that inbound QoS 2 publishes are tracked by publisher packet id until PUBREL.

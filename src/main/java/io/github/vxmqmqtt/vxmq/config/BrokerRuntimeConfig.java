@@ -40,6 +40,12 @@ public interface BrokerRuntimeConfig {
     int timeoutOnConnectSeconds();
 
     /**
+     * Maximum number of QoS 1 / QoS 2 inbound publishes the broker allows concurrently per client.
+     */
+    @WithDefault("65535")
+    int receiveMaximum();
+
+    /**
      * Maximum number of offline QoS 1 messages retained per persistent session.
      */
     @WithDefault("1024")

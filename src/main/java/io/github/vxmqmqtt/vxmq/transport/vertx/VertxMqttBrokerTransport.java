@@ -5,6 +5,7 @@ import io.github.vxmqmqtt.vxmq.observability.BrokerEventSink;
 import io.github.vxmqmqtt.vxmq.protocol.ProtocolEngine;
 import io.github.vxmqmqtt.vxmq.protocol.model.AcceptedConnectResponse;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectOutcome;
+import io.github.vxmqmqtt.vxmq.protocol.model.ConnectProperties;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectRequest;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectResponse;
 import io.github.vxmqmqtt.vxmq.protocol.model.InboundPubRelOutcome;
@@ -219,7 +220,10 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
 
         endpoint.disconnectHandler(() -> protocolEngine.handleDisconnect(connection));
 
-        endpoint.publishAcknowledgeHandler(packetId -> protocolEngine.handlePubAck(connection, packetId));
+        endpoint.publishAcknowledgeHandler(packetId ->
+                protocolEngine.handlePubAck(connection, packetId)
+                        .deliveries()
+                        .forEach(this::sendPublishToSubscriber));
 
         endpoint.publishReleaseHandler(packetId -> {
             InboundPubRelOutcome pubRelResult = protocolEngine.handlePubRel(connection, packetId);
@@ -234,7 +238,10 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
             }
         });
 
-        endpoint.publishCompletionHandler(packetId -> protocolEngine.handlePubComp(connection, packetId));
+        endpoint.publishCompletionHandler(packetId ->
+                protocolEngine.handlePubComp(connection, packetId)
+                        .deliveries()
+                        .forEach(this::sendPublishToSubscriber));
 
         endpoint.closeHandler(() -> {
             endpointsByConnectionId.remove(connection.connectionId());
@@ -264,7 +271,9 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                     password(endpoint.auth()),
                     passwordPresent(endpoint.auth()),
                     willMessage(endpoint.protocolVersion(), endpoint.will()),
-                    userProperties(endpoint.protocolVersion(), endpoint.connectProperties()));
+                    new ConnectProperties(
+                            userProperties(endpoint.protocolVersion(), endpoint.connectProperties()),
+                            receiveMaximum(endpoint.connectProperties())));
         }
 
         return new UnsupportedConnectRequest(
@@ -522,6 +531,19 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
             return 0L;
         }
         return ((Number) property.value()).longValue();
+    }
+
+    private int receiveMaximum(MqttProperties connectProperties) {
+        if (connectProperties == null || connectProperties.isEmpty()) {
+            return 65_535;
+        }
+        MqttProperties.MqttProperty<?> property = connectProperties.getProperty(
+                MqttProperties.MqttPropertyType.RECEIVE_MAXIMUM.value());
+        if (property == null || property.value() == null) {
+            return 65_535;
+        }
+        int value = ((Number) property.value()).intValue();
+        return value < 1 ? 65_535 : value;
     }
 
     private MqttSubscriptionOption subscriptionOption(io.vertx.mutiny.mqtt.MqttTopicSubscription subscription) {

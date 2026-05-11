@@ -21,7 +21,9 @@ import io.github.vxmqmqtt.vxmq.authz.ConfiguredAuthzProvider;
 import io.github.vxmqmqtt.vxmq.observability.BrokerEventSink;
 import io.github.vxmqmqtt.vxmq.protocol.model.AcceptedConnectResponse;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectOutcome;
+import io.github.vxmqmqtt.vxmq.protocol.model.ConnectProperties;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectRequest;
+import io.github.vxmqmqtt.vxmq.protocol.model.DeliveryPlan;
 import io.github.vxmqmqtt.vxmq.protocol.model.InboundPubRelOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.InboundPublishOutcome;
 import io.github.vxmqmqtt.vxmq.protocol.model.PublishDelivery;
@@ -153,6 +155,23 @@ class DefaultProtocolEngineTest {
                 .getProperty(MqttProperties.MqttPropertyType.ASSIGNED_CLIENT_IDENTIFIER.value());
         assertNotNull(assignedClientIdProperty);
         assertEquals(response.effectiveClientId(), assignedClientIdProperty.value());
+    }
+
+    // Verifies that MQTT 5 CONNACK declares the broker Receive Maximum.
+    @Test
+    void shouldDeclareReceiveMaximumForMqtt5() {
+        ClientConnection connection = connectionRegistry.open("127.0.0.1", "client-rm", "MQTT", 5, true);
+
+        ConnectOutcome decision = protocolEngine.handleConnect(connection, mqtt5Connect(
+                "client-rm",
+                true,
+                0L));
+
+        AcceptedConnectResponse response = (AcceptedConnectResponse) decision.response();
+        MqttProperties.MqttProperty<?> property = response.responseProperties()
+                .getProperty(MqttProperties.MqttPropertyType.RECEIVE_MAXIMUM.value());
+        assertNotNull(property);
+        assertEquals(65_535, ((Number) property.value()).intValue());
     }
 
     // Verifies that a second connection with the same client id marks the previous one as superseded.
@@ -634,6 +653,85 @@ class DefaultProtocolEngineTest {
         protocolEngine.handlePubAck(subscriber, result.deliveryPlan().deliveries().getFirst().packetId());
 
         assertEquals(0, sessionRegistry.find("subscriber-qos1-online").orElseThrow().inflightMessageCount());
+    }
+
+    // Verifies that outbound QoS 1 delivery honors the subscriber Receive Maximum and drains after PUBACK.
+    @Test
+    void shouldQueueOutboundQos1WhenSubscriberReceiveMaximumIsFull() {
+        ClientConnection publisher = connectClient("publisher-rm-qos1", 5, true, false, 0L);
+        ClientConnection subscriber = connectClient("subscriber-rm-qos1", 5, false, false, 60L, null, 1);
+        protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 1))));
+
+        InboundPublishOutcome first = protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                41,
+                1,
+                false,
+                false,
+                "first".getBytes()));
+        InboundPublishOutcome second = protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                42,
+                1,
+                false,
+                false,
+                "second".getBytes()));
+
+        assertEquals(1, first.deliveryPlan().deliveries().size());
+        assertTrue(second.deliveryPlan().deliveries().isEmpty());
+        assertEquals(1, sessionRegistry.find("subscriber-rm-qos1").orElseThrow().inflightMessageCount());
+
+        DeliveryPlan drained = protocolEngine.handlePubAck(
+                subscriber,
+                first.deliveryPlan().deliveries().getFirst().packetId());
+
+        assertEquals(1, drained.deliveries().size());
+        assertEquals("second", new String(drained.deliveries().getFirst().payloadCopy()));
+        assertEquals(1, sessionRegistry.find("subscriber-rm-qos1").orElseThrow().inflightMessageCount());
+    }
+
+    // Verifies that inbound QoS 2 Receive Maximum is enforced for different packet ids.
+    @Test
+    void shouldDisconnectWhenInboundQos2ReceiveMaximumIsExceeded() {
+        protocolEngine = new DefaultProtocolEngine(
+                new PermitAllAuthnProvider(),
+                sessionRegistry,
+                retainedMessageRegistry,
+                subscriptionRegistry,
+                mqttTopicSupport,
+                new NoOpBrokerEventSink(),
+                connectionRegistry,
+                clock,
+                1);
+        ClientConnection publisher = connectClient("publisher-rm-inbound", 5, true, false, 0L);
+
+        InboundPublishOutcome first = protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                51,
+                2,
+                false,
+                false,
+                "first".getBytes()));
+        InboundPublishOutcome duplicate = protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                51,
+                2,
+                false,
+                true,
+                "duplicate".getBytes()));
+        InboundPublishOutcome second = protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                52,
+                2,
+                false,
+                false,
+                "second".getBytes()));
+
+        assertFalse(first.disconnectAction().isDisconnect());
+        assertFalse(duplicate.disconnectAction().isDisconnect());
+        assertTrue(second.disconnectAction().isDisconnect());
+        assertEquals(MqttDisconnectReasonCode.RECEIVE_MAXIMUM_EXCEEDED, second.disconnectAction().reasonCode());
     }
 
     // Verifies that retained publishes are stored and replayed immediately after a matching subscribe.
@@ -1489,6 +1587,17 @@ class DefaultProtocolEngineTest {
             boolean cleanStart,
             Long sessionExpiryIntervalSeconds,
             WillMessage willMessage) {
+        return connectClient(clientId, protocolVersion, cleanSession, cleanStart, sessionExpiryIntervalSeconds, willMessage, 65_535);
+    }
+
+    private ClientConnection connectClient(
+            String clientId,
+            int protocolVersion,
+            boolean cleanSession,
+            boolean cleanStart,
+            Long sessionExpiryIntervalSeconds,
+            WillMessage willMessage,
+            int receiveMaximum) {
         ClientConnection connection = connectionRegistry.open(
                 "127.0.0.1",
                 clientId,
@@ -1497,7 +1606,7 @@ class DefaultProtocolEngineTest {
                 protocolVersion == 4 ? cleanSession : cleanStart);
         ConnectOutcome decision = protocolEngine.handleConnect(connection, protocolVersion == 4
                 ? mqtt311Connect(clientId, cleanSession, willMessage)
-                : mqtt5Connect(clientId, cleanStart, sessionExpiryIntervalSeconds, willMessage));
+                : mqtt5Connect(clientId, cleanStart, sessionExpiryIntervalSeconds, willMessage, receiveMaximum));
         assertTrue(decision.response() instanceof AcceptedConnectResponse);
         return connection;
     }
@@ -1519,7 +1628,24 @@ class DefaultProtocolEngineTest {
             boolean cleanStart,
             long sessionExpiryIntervalSeconds,
             WillMessage willMessage) {
-        return new Mqtt5ConnectRequest(clientId, "MQTT", cleanStart, sessionExpiryIntervalSeconds, null, false, willMessage);
+        return mqtt5Connect(clientId, cleanStart, sessionExpiryIntervalSeconds, willMessage, 65_535);
+    }
+
+    private ConnectRequest mqtt5Connect(
+            String clientId,
+            boolean cleanStart,
+            long sessionExpiryIntervalSeconds,
+            WillMessage willMessage,
+            int receiveMaximum) {
+        return new Mqtt5ConnectRequest(
+                clientId,
+                "MQTT",
+                cleanStart,
+                sessionExpiryIntervalSeconds,
+                null,
+                false,
+                willMessage,
+                new ConnectProperties(MqttUserProperties.empty(), receiveMaximum));
     }
 
     private PublishProperties userProperties(MqttUserProperty... userProperties) {

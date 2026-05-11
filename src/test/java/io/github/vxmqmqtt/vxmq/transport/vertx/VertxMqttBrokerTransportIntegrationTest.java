@@ -751,6 +751,11 @@ class VertxMqttBrokerTransportIntegrationTest {
         public int timeoutOnConnectSeconds() {
             return 10;
         }
+
+        @Override
+        public int receiveMaximum() {
+            return 65_535;
+        }
     }
 
     /**

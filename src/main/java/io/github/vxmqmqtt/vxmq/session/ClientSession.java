@@ -30,9 +30,11 @@ public final class ClientSession {
     private final Deque<QueuedMessage> queuedMessages = new ArrayDeque<>();
     // key: packetId, value: InflightMessage
     private final Map<Integer, InflightMessage> inflightMessages = new LinkedHashMap<>();
+    private final Deque<QueuedMessage> pendingOutboundMessages = new ArrayDeque<>();
     // key: packetId, value: InboundQos2Message
     private final Map<Integer, InboundQos2Message> inboundQos2Messages = new LinkedHashMap<>();
     private volatile WillMessage willMessage;
+    private volatile int receiveMaximum = 65_535;
     private int nextPacketId = 1;
 
     public ClientSession(String clientId) {
@@ -94,11 +96,21 @@ public final class ClientSession {
             boolean newPersistent,
             Long newSessionExpiryIntervalSeconds,
             WillMessage newWillMessage) {
+        activate(newConnectionId, newPersistent, newSessionExpiryIntervalSeconds, newWillMessage, 65_535);
+    }
+
+    public void activate(
+            String newConnectionId,
+            boolean newPersistent,
+            Long newSessionExpiryIntervalSeconds,
+            WillMessage newWillMessage,
+            int newReceiveMaximum) {
         this.connectionId = newConnectionId;
         this.persistent = newPersistent;
         this.sessionExpiryIntervalSeconds = newSessionExpiryIntervalSeconds;
         this.expiresAt = null;
         this.willMessage = copyWillMessage(newWillMessage);
+        this.receiveMaximum = newReceiveMaximum;
     }
 
     /**
@@ -159,11 +171,19 @@ public final class ClientSession {
         return inflightMessages.size();
     }
 
+    public synchronized int pendingOutboundMessageCount() {
+        return pendingOutboundMessages.size();
+    }
+
     /**
      * Returns the number of inbound QoS 2 messages waiting for PUBREL.
      */
     public synchronized int inboundQos2MessageCount() {
         return inboundQos2Messages.size();
+    }
+
+    public synchronized boolean hasInboundQos2Message(int packetId) {
+        return inboundQos2Messages.containsKey(packetId);
     }
 
     /**
@@ -232,6 +252,9 @@ public final class ClientSession {
             boolean fromOfflineQueue,
             PublishProperties properties,
             List<Integer> subscriptionIdentifiers) {
+        if (qos.value() > 0 && !hasOutboundReceiveWindow()) {
+            return null;
+        }
         int packetId = allocatePacketId();
         OutboundQos2State qos2State = qos == MqttQoS.EXACTLY_ONCE ? OutboundQos2State.PUBLISH_SENT : null;
         InflightMessage inflightMessage = new InflightMessage(
@@ -249,6 +272,20 @@ public final class ClientSession {
         return inflightMessage;
     }
 
+    public synchronized void enqueuePendingOutboundMessage(QueuedMessage message, int capacity) {
+        while (pendingOutboundMessages.size() >= capacity) {
+            pendingOutboundMessages.pollFirst();
+        }
+        pendingOutboundMessages.addLast(new QueuedMessage(
+                message.topicName(),
+                message.payloadCopy(),
+                message.qos(),
+                message.retain(),
+                message.duplicate(),
+                message.properties(),
+                message.subscriptionIdentifiers()));
+    }
+
     /**
      * Drains queued offline messages into inflight deliveries in FIFO order.
      */
@@ -261,7 +298,7 @@ public final class ClientSession {
      */
     public synchronized List<InflightMessage> drainQueuedMessagesToInflight(Instant now) {
         List<InflightMessage> drained = new ArrayList<>();
-        while (!queuedMessages.isEmpty()) {
+        while (!queuedMessages.isEmpty() && hasOutboundReceiveWindow()) {
             QueuedMessage queuedMessage = queuedMessages.pollFirst();
             if (now != null && queuedMessage.properties().messageExpiry().isExpired(now)) {
                 continue;
@@ -273,6 +310,26 @@ public final class ClientSession {
                     queuedMessage.retain(),
                     queuedMessage.duplicate(),
                     true,
+                    queuedMessage.properties(),
+                    queuedMessage.subscriptionIdentifiers()));
+        }
+        return drained;
+    }
+
+    public synchronized List<InflightMessage> drainPendingOutboundMessagesToInflight(Instant now) {
+        List<InflightMessage> drained = new ArrayList<>();
+        while (!pendingOutboundMessages.isEmpty() && hasOutboundReceiveWindow()) {
+            QueuedMessage queuedMessage = pendingOutboundMessages.pollFirst();
+            if (now != null && queuedMessage.properties().messageExpiry().isExpired(now)) {
+                continue;
+            }
+            drained.add(createInflightMessage(
+                    queuedMessage.topicName(),
+                    queuedMessage.payloadCopy(),
+                    queuedMessage.qos(),
+                    queuedMessage.retain(),
+                    queuedMessage.duplicate(),
+                    false,
                     queuedMessage.properties(),
                     queuedMessage.subscriptionIdentifiers()));
         }
@@ -445,5 +502,9 @@ public final class ClientSession {
             }
         }
         throw new IllegalStateException("No MQTT packet identifiers available for session " + clientId);
+    }
+
+    private boolean hasOutboundReceiveWindow() {
+        return inflightMessages.size() < receiveMaximum;
     }
 }

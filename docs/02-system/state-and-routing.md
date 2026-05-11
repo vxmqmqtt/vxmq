@@ -49,10 +49,13 @@
   - 该会话离线期间积压、等待恢复投递的 QoS 1 消息。
 - `inflightMessages`
   - 已发送给订阅端、正在等待 `PUBACK` 的 QoS 1 消息。
+- `pendingOutboundMessages`
+  - 在线连接仍存在但 MQTT 5 `Receive Maximum` 窗口已满时，等待后续下发的 QoS 1 / QoS 2 消息。
 
 当前语义：
 
 - 在线目标会话收到 QoS 1 消息后，会进入 inflight 跟踪。
+- 若目标会话的出站 receive window 已满，QoS 1 / QoS 2 消息先进入 pending 队列，待 `PUBACK` / `PUBCOMP` 释放窗口后继续下发。
 - 若连接在消息确认前关闭，这些 inflight 消息会回退为离线队列。
 - 会话恢复时，离线队列中的 QoS 1 消息会重新下发，并重新进入 inflight。
 
