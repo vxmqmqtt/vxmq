@@ -75,7 +75,7 @@
 | M3-05 | Message Expiry Interval | 已完成 | 消息过期语义落到在线/离线投递路径；过期后不再下发；测试覆盖 |
 | M3-06 | Receive Maximum | 已完成 | Broker 在 CONNACK 声明 receive maximum；客户端 receive maximum 限制出站 QoS 1 / QoS 2 inflight；出站超限暂存后随 PUBACK / PUBCOMP 继续发送；入站 QoS 2 超限断连；测试覆盖 |
 | M3-07 | Maximum Packet Size | 已完成 | Broker 在 CONNACK 声明 maximum packet size；入站 MQTT 5 PUBLISH 超限断连；出站超出客户端限制时跳过投递；测试覆盖 |
-| M3-08 | Response Topic / Correlation Data | 未开始 | 属性透传与可见性验证完成；文档补充请求-响应场景限制 |
+| M3-08 | Request-Response Pattern（Response Topic / Correlation Data） | 已完成 | Broker 支持 MQTT 5 request-response 模式所需的 Response Topic / Correlation Data：入站校验、在线/离线/retained/QoS 2/will 路径原样透传、出站可见性验证完成；文档明确 Broker 不维护请求状态、不自动生成响应 |
 | M3-09 | Payload Format Indicator / Content Type | 未开始 | 属性透传策略明确；无隐式内容校验副作用；测试覆盖 |
 | M3-10 | 用户名密码认证与鉴权链（基础版） | 已完成 | CONNECT 认证入口落地；配置驱动 static username/password 可用；SUBSCRIBE / PUBLISH / Will 鉴权链已接入且当前默认放行；成功/失败路径有测试 |
 | M3-11 | 健康检查（Readiness / Liveness） | 未开始 | 关键组件状态暴露；异常状态可复现验证 |

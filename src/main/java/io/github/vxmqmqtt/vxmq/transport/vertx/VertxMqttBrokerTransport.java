@@ -471,6 +471,16 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                 .ifPresent(remaining -> properties.add(new MqttProperties.IntegerProperty(
                         MqttProperties.MqttPropertyType.PUBLICATION_EXPIRY_INTERVAL.value(),
                         (int) remaining)));
+        if (delivery.properties().responseTopic() != null) {
+            properties.add(new MqttProperties.StringProperty(
+                    MqttProperties.MqttPropertyType.RESPONSE_TOPIC.value(),
+                    delivery.properties().responseTopic()));
+        }
+        if (delivery.properties().correlationData() != null) {
+            properties.add(new MqttProperties.BinaryProperty(
+                    MqttProperties.MqttPropertyType.CORRELATION_DATA.value(),
+                    delivery.properties().correlationData()));
+        }
         for (Integer subscriptionIdentifier : delivery.subscriptionIdentifiers()) {
             properties.add(new MqttProperties.IntegerProperty(
                     MqttProperties.MqttPropertyType.SUBSCRIPTION_IDENTIFIER.value(),
@@ -482,7 +492,11 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
     private PublishProperties publishProperties(int protocolVersion, MqttProperties mqttProperties) {
         return new PublishProperties(
                 userProperties(protocolVersion, mqttProperties),
-                messageExpiry(protocolVersion, mqttProperties));
+                messageExpiry(protocolVersion, mqttProperties),
+                responseTopic(protocolVersion, mqttProperties),
+                correlationData(protocolVersion, mqttProperties),
+                duplicatePublishProperty(protocolVersion, mqttProperties, MqttProperties.MqttPropertyType.RESPONSE_TOPIC),
+                duplicatePublishProperty(protocolVersion, mqttProperties, MqttProperties.MqttPropertyType.CORRELATION_DATA));
     }
 
     private int publishPropertiesSize(int protocolVersion, MqttProperties mqttProperties) {
@@ -515,6 +529,40 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
         }
         long intervalSeconds = Integer.toUnsignedLong(((Number) property.value()).intValue());
         return io.github.vxmqmqtt.vxmq.protocol.model.MessageExpiry.fromIntervalSeconds(intervalSeconds, Instant.now());
+    }
+
+    private String responseTopic(int protocolVersion, MqttProperties mqttProperties) {
+        if (protocolVersion != 5 || mqttProperties == null) {
+            return null;
+        }
+        MqttProperties.MqttProperty<?> property = mqttProperties.getProperty(
+                MqttProperties.MqttPropertyType.RESPONSE_TOPIC.value());
+        if (property == null || property.value() == null) {
+            return null;
+        }
+        return (String) property.value();
+    }
+
+    private byte[] correlationData(int protocolVersion, MqttProperties mqttProperties) {
+        if (protocolVersion != 5 || mqttProperties == null) {
+            return null;
+        }
+        MqttProperties.MqttProperty<?> property = mqttProperties.getProperty(
+                MqttProperties.MqttPropertyType.CORRELATION_DATA.value());
+        if (property == null || property.value() == null) {
+            return null;
+        }
+        byte[] value = (byte[]) property.value();
+        return value.clone();
+    }
+
+    private boolean duplicatePublishProperty(
+            int protocolVersion,
+            MqttProperties mqttProperties,
+            MqttProperties.MqttPropertyType propertyType) {
+        return protocolVersion == 5
+                && mqttProperties != null
+                && mqttProperties.getProperties(propertyType.value()).size() > 1;
     }
 
     /**
@@ -622,7 +670,17 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                     default -> io.netty.handler.codec.mqtt.MqttQoS.AT_MOST_ONCE;
                 },
                 will.isWillRetain(),
-                new PublishProperties(userProperties(protocolVersion, will.getWillProperties())));
+                willPublishProperties(protocolVersion, will.getWillProperties()));
+    }
+
+    private PublishProperties willPublishProperties(int protocolVersion, MqttProperties mqttProperties) {
+        return new PublishProperties(
+                userProperties(protocolVersion, mqttProperties),
+                io.github.vxmqmqtt.vxmq.protocol.model.MessageExpiry.none(),
+                responseTopic(protocolVersion, mqttProperties),
+                correlationData(protocolVersion, mqttProperties),
+                duplicatePublishProperty(protocolVersion, mqttProperties, MqttProperties.MqttPropertyType.RESPONSE_TOPIC),
+                duplicatePublishProperty(protocolVersion, mqttProperties, MqttProperties.MqttPropertyType.CORRELATION_DATA));
     }
 
     /**

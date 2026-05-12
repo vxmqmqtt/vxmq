@@ -1,6 +1,7 @@
 package io.github.vxmqmqtt.vxmq.protocol;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -593,6 +594,74 @@ class DefaultProtocolEngineTest {
         assertEquals(properties.messageExpiry(), result.deliveryPlan().deliveries().getFirst().properties().messageExpiry());
     }
 
+    // Verifies that online deliveries preserve MQTT 5 request-response properties.
+    @Test
+    void shouldPreserveRequestResponsePropertiesForOnlinePublishDelivery() {
+        ClientConnection publisher = connectClient("publisher-request-response", 5, true, false, 0L);
+        ClientConnection subscriber = connectClient("subscriber-request-response", 5, true, false, 0L);
+        protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("requests/+", 0))));
+
+        InboundPublishOutcome result = protocolEngine.handlePublish(publisher, new PublishRequest(
+                "requests/temperature",
+                0,
+                0,
+                false,
+                false,
+                "payload".getBytes(),
+                requestResponseProperties("responses/client-a", new byte[]{1, 2, 3})));
+
+        PublishProperties properties = result.deliveryPlan().deliveries().getFirst().properties();
+        assertEquals("responses/client-a", properties.responseTopic());
+        assertArrayEquals(new byte[]{1, 2, 3}, properties.correlationData());
+    }
+
+    // Verifies that invalid Response Topic values are rejected before routing state changes.
+    @Test
+    void shouldRejectPublishWithInvalidResponseTopic() {
+        ClientConnection publisher = connectClient("publisher-invalid-response-topic", 5, true, false, 0L);
+        ClientConnection subscriber = connectClient("subscriber-invalid-response-topic", 5, true, false, 0L);
+        protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("requests/+", 0))));
+
+        InboundPublishOutcome result = protocolEngine.handlePublish(publisher, new PublishRequest(
+                "requests/temperature",
+                0,
+                0,
+                false,
+                false,
+                "payload".getBytes(),
+                requestResponseProperties("responses/+", new byte[]{1, 2, 3})));
+
+        assertTrue(result.disconnectAction().isDisconnect());
+        assertEquals(MqttDisconnectReasonCode.PROTOCOL_ERROR, result.disconnectAction().reasonCode());
+        assertTrue(result.deliveryPlan().isEmpty());
+    }
+
+    // Verifies that duplicate singleton request-response properties are rejected as protocol errors.
+    @Test
+    void shouldRejectPublishWithDuplicateRequestResponseProperties() {
+        ClientConnection publisher = connectClient("publisher-duplicate-request-response", 5, true, false, 0L);
+
+        InboundPublishOutcome result = protocolEngine.handlePublish(publisher, new PublishRequest(
+                "requests/temperature",
+                0,
+                0,
+                false,
+                false,
+                "payload".getBytes(),
+                new PublishProperties(
+                        MqttUserProperties.empty(),
+                        MessageExpiry.none(),
+                        "responses/client-a",
+                        new byte[]{1, 2, 3},
+                        true,
+                        true)));
+
+        assertTrue(result.disconnectAction().isDisconnect());
+        assertEquals(MqttDisconnectReasonCode.PROTOCOL_ERROR, result.disconnectAction().reasonCode());
+    }
+
     // Verifies that MQTT 5 No Local subscriptions do not receive publishes from the same client.
     @Test
     void shouldSkipNoLocalDeliveryForSameClientPublisher() {
@@ -1117,6 +1186,28 @@ class DefaultProtocolEngineTest {
                 retainedDelivery.properties().userProperties().values());
     }
 
+    // Verifies that retained replay preserves MQTT 5 request-response properties.
+    @Test
+    void shouldPreserveRequestResponsePropertiesForRetainedReplay() {
+        ClientConnection publisher = connectClient("publisher-retained-request-response", 5, true, false, 0L);
+        protocolEngine.handlePublish(publisher, new PublishRequest(
+                "requests/temperature",
+                0,
+                0,
+                true,
+                false,
+                "retained-payload".getBytes(),
+                requestResponseProperties("responses/client-a", new byte[]{1, 2, 3})));
+        ClientConnection subscriber = connectClient("subscriber-retained-request-response", 5, true, false, 0L);
+
+        SubscribeOutcome subscribeResult = protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("requests/+", 0))));
+
+        PublishProperties properties = subscribeResult.retainedReplayPlan().deliveries().getFirst().properties();
+        assertEquals("responses/client-a", properties.responseTopic());
+        assertArrayEquals(new byte[]{1, 2, 3}, properties.correlationData());
+    }
+
     // Verifies that expired retained messages are not replayed and are lazily removed.
     @Test
     void shouldNotReplayExpiredRetainedMessage() {
@@ -1308,6 +1399,38 @@ class DefaultProtocolEngineTest {
                 resumedDeliveries.getFirst().properties().userProperties().values());
     }
 
+    // Verifies that offline queued deliveries preserve MQTT 5 request-response properties across reconnect.
+    @Test
+    void shouldResumeQueuedMessageWithRequestResponseProperties() {
+        ClientConnection publisher = connectClient("publisher-request-response-resume", 5, true, false, 0L);
+        ClientConnection firstSubscriberConnection =
+                connectClient("subscriber-request-response-resume", 5, false, false, 60L);
+        protocolEngine.handleSubscribe(firstSubscriberConnection, new SubscriptionRequest(List.of(
+                new SubscriptionItem("requests/+", 1))));
+        closeClientConnection(firstSubscriberConnection);
+
+        protocolEngine.handlePublish(publisher, new PublishRequest(
+                "requests/temperature",
+                23,
+                1,
+                false,
+                false,
+                "payload".getBytes(),
+                requestResponseProperties("responses/client-a", new byte[]{1, 2, 3})));
+
+        ClientConnection secondSubscriberConnection =
+                connectClient("subscriber-request-response-resume", 5, false, false, 60L);
+        SessionResumePlan resumePlan = protocolEngine.handleSessionResume(secondSubscriberConnection);
+        List<PublishDelivery> resumedDeliveries = resumePlan.actions().stream()
+                .map(ReplayPublish.class::cast)
+                .map(ReplayPublish::delivery)
+                .toList();
+
+        PublishProperties properties = resumedDeliveries.getFirst().properties();
+        assertEquals("responses/client-a", properties.responseTopic());
+        assertArrayEquals(new byte[]{1, 2, 3}, properties.correlationData());
+    }
+
     // Verifies that expired queued messages are discarded instead of being resumed after reconnect.
     @Test
     void shouldDropExpiredQueuedMessageOnReconnect() {
@@ -1391,6 +1514,30 @@ class DefaultProtocolEngineTest {
         assertEquals(
                 List.of(new MqttUserProperty("qos", "2")),
                 pubRelResult.deliveryPlan().deliveries().getFirst().properties().userProperties().values());
+    }
+
+    // Verifies that QoS 2 delayed routing preserves MQTT 5 request-response properties.
+    @Test
+    void shouldPreserveRequestResponsePropertiesForQos2PublishAfterPubRel() {
+        ClientConnection publisher = connectClient("publisher-qos2-request-response", 5, true, false, 0L);
+        ClientConnection subscriber = connectClient("subscriber-qos2-request-response", 5, false, false, 60L);
+        protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("requests/+", 2))));
+
+        protocolEngine.handlePublish(publisher, new PublishRequest(
+                "requests/temperature",
+                49,
+                2,
+                false,
+                false,
+                "payload-qos2".getBytes(),
+                requestResponseProperties("responses/client-a", new byte[]{1, 2, 3})));
+
+        InboundPubRelOutcome pubRelResult = protocolEngine.handlePubRel(publisher, 49);
+
+        PublishProperties properties = pubRelResult.deliveryPlan().deliveries().getFirst().properties();
+        assertEquals("responses/client-a", properties.responseTopic());
+        assertArrayEquals(new byte[]{1, 2, 3}, properties.correlationData());
     }
 
     // Verifies that inbound QoS 2 messages expiring before PUBREL complete without routing.
@@ -1718,6 +1865,32 @@ class DefaultProtocolEngineTest {
                 deliveryFor(deliveries, "subscriber-will-user-properties").properties().userProperties().values());
     }
 
+    // Verifies that will publishes preserve MQTT 5 request-response properties.
+    @Test
+    void shouldPublishWillRequestResponsePropertiesAfterAbnormalClose() {
+        ClientConnection subscriber = connectClient("subscriber-will-request-response", 5, true, false, 0L);
+        protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("status/+", 0))));
+        ClientConnection publisher = connectClient(
+                "publisher-will-request-response",
+                5,
+                false,
+                false,
+                60L,
+                new WillMessage(
+                        "status/publisher-will-request-response",
+                        "offline".getBytes(),
+                        MqttQoS.AT_MOST_ONCE,
+                        false,
+                        requestResponseProperties("responses/client-a", new byte[]{1, 2, 3})));
+
+        List<PublishDelivery> deliveries = protocolEngine.handleConnectionClosed(publisher);
+
+        PublishProperties properties = deliveryFor(deliveries, "subscriber-will-request-response").properties();
+        assertEquals("responses/client-a", properties.responseTopic());
+        assertArrayEquals(new byte[]{1, 2, 3}, properties.correlationData());
+    }
+
     // Verifies that a server-originated QoS 2 will is routed immediately instead of entering inbound QoS 2 handshaking.
     @Test
     void shouldPublishQos2WillAfterAbnormalClose() {
@@ -1943,6 +2116,14 @@ class DefaultProtocolEngineTest {
 
     private PublishProperties messageExpiryAt(Instant expiresAt) {
         return new PublishProperties(MqttUserProperties.empty(), new MessageExpiry(expiresAt));
+    }
+
+    private PublishProperties requestResponseProperties(String responseTopic, byte[] correlationData) {
+        return new PublishProperties(
+                MqttUserProperties.empty(),
+                MessageExpiry.none(),
+                responseTopic,
+                correlationData);
     }
 
     private DefaultProtocolEngine protocolEngineWith(SubscriptionRegistry subscriptionRegistry) {

@@ -52,6 +52,12 @@ public final class MqttPacketSizeEstimator {
         if (!properties.messageExpiry().isEmpty()) {
             size += 1 + 4;
         }
+        if (properties.responseTopic() != null) {
+            size += 1 + utf8Size(properties.responseTopic());
+        }
+        if (properties.correlationData() != null) {
+            size += 1 + binarySize(properties.correlationData());
+        }
         return size;
     }
 
@@ -83,5 +89,9 @@ public final class MqttPacketSizeEstimator {
 
     private static int utf8Size(String value) {
         return 2 + (value == null ? 0 : value.getBytes(StandardCharsets.UTF_8).length);
+    }
+
+    private static int binarySize(byte[] value) {
+        return 2 + (value == null ? 0 : value.length);
     }
 }

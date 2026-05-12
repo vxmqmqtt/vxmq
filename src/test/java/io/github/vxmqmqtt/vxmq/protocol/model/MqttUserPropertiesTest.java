@@ -1,6 +1,7 @@
 package io.github.vxmqmqtt.vxmq.protocol.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -76,6 +77,37 @@ class MqttUserPropertiesTest {
         assertEquals(1L, expiry.remainingIntervalSeconds(receivedAt.plusSeconds(59)).orElseThrow());
     }
 
+    // Verifies that publish properties expose MQTT 5 request-response properties.
+    @Test
+    void shouldExposePublishRequestResponseProperties() {
+        PublishProperties properties = new PublishProperties(
+                MqttUserProperties.empty(),
+                MessageExpiry.none(),
+                "responses/client-a",
+                new byte[]{1, 2, 3});
+
+        assertEquals("responses/client-a", properties.responseTopic());
+        assertArrayEquals(new byte[]{1, 2, 3}, properties.correlationData());
+        assertFalse(properties.isEmpty());
+    }
+
+    // Verifies that Correlation Data cannot be mutated through caller-owned arrays or accessors.
+    @Test
+    void shouldDefensivelyCopyCorrelationData() {
+        byte[] correlationData = new byte[]{1, 2, 3};
+        PublishProperties properties = new PublishProperties(
+                MqttUserProperties.empty(),
+                MessageExpiry.none(),
+                "responses/client-a",
+                correlationData);
+        correlationData[0] = 9;
+
+        byte[] exposed = properties.correlationData();
+        exposed[1] = 8;
+
+        assertArrayEquals(new byte[]{1, 2, 3}, properties.correlationData());
+    }
+
     // Verifies that packet-level property containers normalize nulls to empty properties.
     @Test
     void shouldNormalizeNullPacketProperties() {
@@ -86,6 +118,7 @@ class MqttUserPropertiesTest {
         assertTrue(new UnsubscribeProperties(null).isEmpty());
         assertTrue(new PublishProperties(null).isEmpty());
         assertTrue(new PublishProperties(null, null).isEmpty());
+        assertTrue(new PublishProperties(null, null, null, null).isEmpty());
         assertTrue(MessageExpiry.none().isEmpty());
     }
 

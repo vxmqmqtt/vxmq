@@ -549,6 +549,36 @@ class VertxMqttBrokerTransportTest {
         assertTrue(remaining <= 30L);
     }
 
+    // Verifies that MQTT 5 inbound PUBLISH request-response properties are passed to the protocol engine.
+    @Test
+    void shouldMapMqtt5PublishRequestResponseProperties() throws Exception {
+        AtomicReference<PublishRequest> capturedRequest = new AtomicReference<>();
+        ProtocolEngine protocolEngine = protocolEngineCapturingPublish(capturedRequest);
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngine,
+                new ClientConnectionRegistry(),
+                brokerEventSink());
+        ClientConnection connection = connectedClient("client-publish-request-response");
+        EndpointProbe probe = new EndpointProbe(5, true);
+
+        installHandlers(transport, connection, probe.endpoint());
+        probe.invokePublishHandler(new PublishMessageProbe(
+                "requests/temperature",
+                7,
+                0,
+                false,
+                false,
+                "payload",
+                requestResponseProperties("responses/client-a", new byte[]{1, 2, 3})).message());
+
+        assertNotNull(capturedRequest.get());
+        assertEquals("responses/client-a", capturedRequest.get().properties().responseTopic());
+        assertArrayEquals(new byte[]{1, 2, 3}, capturedRequest.get().properties().correlationData());
+        assertTrue(capturedRequest.get().packetSize() > capturedRequest.get().payloadSize());
+    }
+
     // Verifies that outbound MQTT 5 publishes include both User Property and Subscription Identifier properties.
     @Test
     void shouldAddUserPropertiesAndSubscriptionIdentifiersToMqtt5PublishProperties() throws Exception {
@@ -591,7 +621,41 @@ class VertxMqttBrokerTransportTest {
                                 MqttProperties.MqttPropertyType.SUBSCRIPTION_IDENTIFIER.value())
                         .stream()
                 .map(MqttProperties.MqttProperty::value)
-                .toList());
+                        .toList());
+    }
+
+    // Verifies that MQTT 5 outbound publishes include request-response properties.
+    @Test
+    void shouldAddRequestResponsePropertiesToMqtt5PublishProperties() throws Exception {
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngineReturning(InboundPublishOutcome.rejected()),
+                new ClientConnectionRegistry(),
+                brokerEventSink());
+        EndpointProbe probe = new EndpointProbe(5, true);
+
+        publishToSubscriber(transport, probe.endpoint(), new PublishDelivery(
+                "subscriber-with-request-response",
+                "requests/temperature",
+                "payload".getBytes(),
+                MqttQoS.AT_LEAST_ONCE,
+                false,
+                false,
+                12,
+                false,
+                requestResponseProperties("responses/client-a", new byte[]{1, 2, 3}),
+                List.of()));
+
+        assertNotNull(probe.publishProperties);
+        MqttProperties.MqttProperty<?> responseTopicProperty = probe.publishProperties.getProperty(
+                MqttProperties.MqttPropertyType.RESPONSE_TOPIC.value());
+        MqttProperties.MqttProperty<?> correlationDataProperty = probe.publishProperties.getProperty(
+                MqttProperties.MqttPropertyType.CORRELATION_DATA.value());
+        assertNotNull(responseTopicProperty);
+        assertNotNull(correlationDataProperty);
+        assertEquals("responses/client-a", responseTopicProperty.value());
+        assertArrayEquals(new byte[]{1, 2, 3}, (byte[]) correlationDataProperty.value());
     }
 
     // Verifies that MQTT 5 outbound publishes include Message Expiry Interval with other publish properties.
@@ -696,6 +760,36 @@ class VertxMqttBrokerTransportTest {
         assertEquals(
                 List.of(new MqttUserProperty("trace", "will"), new MqttUserProperty("source", "connect")),
                 request.willMessage().properties().userProperties().values());
+    }
+
+    // Verifies that MQTT 5 CONNECT will request-response properties are mapped onto the broker will model.
+    @Test
+    void shouldMapMqtt5WillRequestResponseProperties() throws Exception {
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngineReturning(InboundPublishOutcome.rejected()),
+                new ClientConnectionRegistry(),
+                brokerEventSink());
+        MqttProperties willProperties = new MqttProperties();
+        willProperties.add(new MqttProperties.StringProperty(
+                MqttProperties.MqttPropertyType.RESPONSE_TOPIC.value(),
+                "responses/client-a"));
+        willProperties.add(new MqttProperties.BinaryProperty(
+                MqttProperties.MqttPropertyType.CORRELATION_DATA.value(),
+                new byte[]{1, 2, 3}));
+        MqttWill will = new MqttWill(
+                true,
+                "status/client-will",
+                Buffer.buffer("offline"),
+                1,
+                true,
+                willProperties);
+
+        ConnectRequest request = buildConnectRequest(transport, new ConnectEndpointProbe(5, will).endpoint());
+
+        assertEquals("responses/client-a", request.willMessage().properties().responseTopic());
+        assertArrayEquals(new byte[]{1, 2, 3}, request.willMessage().properties().correlationData());
     }
 
     // Verifies that a QoS 2 CONNECT will is preserved in the broker will model.
@@ -971,6 +1065,14 @@ class VertxMqttBrokerTransportTest {
         return new PublishProperties(
                 MqttUserProperties.empty(),
                 MessageExpiry.fromIntervalSeconds(intervalSeconds, Instant.now()));
+    }
+
+    private static PublishProperties requestResponseProperties(String responseTopic, byte[] correlationData) {
+        return new PublishProperties(
+                MqttUserProperties.empty(),
+                MessageExpiry.none(),
+                responseTopic,
+                correlationData);
     }
 
     private static ClientConnection connectedClient(String clientId) {
@@ -1713,6 +1815,16 @@ class VertxMqttBrokerTransportTest {
                     .ifPresent(remaining -> mqttProperties.add(new MqttProperties.IntegerProperty(
                             MqttProperties.MqttPropertyType.PUBLICATION_EXPIRY_INTERVAL.value(),
                             (int) remaining)));
+            if (publishProperties.responseTopic() != null) {
+                mqttProperties.add(new MqttProperties.StringProperty(
+                        MqttProperties.MqttPropertyType.RESPONSE_TOPIC.value(),
+                        publishProperties.responseTopic()));
+            }
+            if (publishProperties.correlationData() != null) {
+                mqttProperties.add(new MqttProperties.BinaryProperty(
+                        MqttProperties.MqttPropertyType.CORRELATION_DATA.value(),
+                        publishProperties.correlationData()));
+            }
             this.message = (MqttPublishMessage) Proxy.newProxyInstance(
                     MqttPublishMessage.class.getClassLoader(),
                     new Class<?>[]{MqttPublishMessage.class},

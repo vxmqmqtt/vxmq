@@ -565,6 +565,11 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             return InboundPublishOutcome.rejectedWithDisconnect(MqttDisconnectReasonCode.QOS_NOT_SUPPORTED);
         }
 
+        if (hasInvalidPublishProperties(connection, request.properties())) {
+            brokerEventSink.protocolWarning(connection, "Invalid MQTT 5 PUBLISH request-response properties");
+            return InboundPublishOutcome.rejectedWithDisconnect(MqttDisconnectReasonCode.PROTOCOL_ERROR);
+        }
+
         if (connection.protocolVersion() == 5 && request.packetSize() > brokerMaximumPacketSize) {
             brokerEventSink.protocolWarning(connection, "Rejected publish over maximum packet size");
             return InboundPublishOutcome.rejectedWithDisconnect(MqttDisconnectReasonCode.PACKET_TOO_LARGE);
@@ -883,6 +888,15 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         Integer subscriptionIdentifier = properties.subscriptionIdentifier();
         return properties.duplicateSubscriptionIdentifier()
                 || (subscriptionIdentifier != null && subscriptionIdentifier < 1);
+    }
+
+    private boolean hasInvalidPublishProperties(ClientConnection connection, PublishProperties properties) {
+        if (connection.protocolVersion() != 5 || properties == null) {
+            return false;
+        }
+        return properties.duplicateResponseTopic()
+                || properties.duplicateCorrelationData()
+                || (properties.responseTopic() != null && !mqttTopicSupport.isValidTopicName(properties.responseTopic()));
     }
 
     private String resolveClientId(ConnectRequest request) {
