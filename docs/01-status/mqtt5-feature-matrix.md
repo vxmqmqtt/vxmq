@@ -41,7 +41,7 @@
 | MQTT 5 属性 | Maximum Packet Size | M3 | 不适用 | 支持 | 已验证 | CONNACK 声明 Broker maximum packet size；入站 PUBLISH 超限返回 `PACKET_TOO_LARGE`；出站超出客户端限制时跳过投递 |
 | MQTT 5 属性 | Topic Alias | M5 | 不适用 | 不支持 | 未开始 | 高级优化能力 |
 | MQTT 5 属性 | Request-Response Pattern（Response Topic / Correlation Data） | M3 | 不适用 | 支持 | 已验证 | Broker 校验并透传 request-response 属性；应用负责订阅响应主题、生成响应、复制 correlation data 和处理超时 |
-| MQTT 5 属性 | Payload Format Indicator / Content Type | M3 | 不适用 | 不支持 | 未开始 | 语义透传为主 |
+| MQTT 5 属性 | Payload Format Indicator / Content Type | M3 | 不适用 | 支持 | 已验证 | PUBLISH / Will 纯透传；不校验 payload 是否符合声明格式 |
 | MQTT 5 属性 | 服务端能力声明 | M4 | 不适用 | 不支持 | 未开始 | 包括 `Maximum QoS`、`Retain Available`、`Wildcard Subscription Available`、`Shared Subscription Available` 等对外声明 |
 | 安全 | 用户名密码认证与鉴权链 | M3 | 基础支持 | 基础支持 | 已验证 | 配置驱动 static username/password；未启用认证资源时 permit-all；鉴权链已接入 CONNECT Will / SUBSCRIBE / PUBLISH，当前无 ACL 规则 |
 | 安全 | TLS | M4 | 不支持 | 不支持 | 未开始 | 与部署方式和证书管理联动 |

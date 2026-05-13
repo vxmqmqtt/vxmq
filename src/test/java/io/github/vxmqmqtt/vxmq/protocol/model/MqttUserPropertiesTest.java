@@ -91,6 +91,36 @@ class MqttUserPropertiesTest {
         assertFalse(properties.isEmpty());
     }
 
+    // Verifies that publish properties expose payload metadata without implying payload validation.
+    @Test
+    void shouldExposePublishPayloadMetadata() {
+        PublishProperties properties = new PublishProperties(
+                MqttUserProperties.empty(),
+                MessageExpiry.none(),
+                null,
+                null,
+                1,
+                "application/json");
+
+        assertEquals(1, properties.payloadFormatIndicator());
+        assertEquals("application/json", properties.contentType());
+        assertFalse(properties.isEmpty());
+    }
+
+    // Verifies that MQTT 5 publish packet sizing accounts for payload metadata properties.
+    @Test
+    void shouldIncludePayloadMetadataInPublishPropertySize() {
+        PublishProperties properties = new PublishProperties(
+                MqttUserProperties.empty(),
+                MessageExpiry.none(),
+                null,
+                null,
+                1,
+                "text/plain");
+
+        assertEquals(15, MqttPacketSizeEstimator.publishPropertiesSize(properties));
+    }
+
     // Verifies that Correlation Data cannot be mutated through caller-owned arrays or accessors.
     @Test
     void shouldDefensivelyCopyCorrelationData() {

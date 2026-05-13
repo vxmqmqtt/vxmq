@@ -481,6 +481,16 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                     MqttProperties.MqttPropertyType.CORRELATION_DATA.value(),
                     delivery.properties().correlationData()));
         }
+        if (delivery.properties().payloadFormatIndicator() != null) {
+            properties.add(new MqttProperties.IntegerProperty(
+                    MqttProperties.MqttPropertyType.PAYLOAD_FORMAT_INDICATOR.value(),
+                    delivery.properties().payloadFormatIndicator()));
+        }
+        if (delivery.properties().contentType() != null) {
+            properties.add(new MqttProperties.StringProperty(
+                    MqttProperties.MqttPropertyType.CONTENT_TYPE.value(),
+                    delivery.properties().contentType()));
+        }
         for (Integer subscriptionIdentifier : delivery.subscriptionIdentifiers()) {
             properties.add(new MqttProperties.IntegerProperty(
                     MqttProperties.MqttPropertyType.SUBSCRIPTION_IDENTIFIER.value(),
@@ -495,6 +505,8 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                 messageExpiry(protocolVersion, mqttProperties),
                 responseTopic(protocolVersion, mqttProperties),
                 correlationData(protocolVersion, mqttProperties),
+                payloadFormatIndicator(protocolVersion, mqttProperties),
+                contentType(protocolVersion, mqttProperties),
                 duplicatePublishProperty(protocolVersion, mqttProperties, MqttProperties.MqttPropertyType.RESPONSE_TOPIC),
                 duplicatePublishProperty(protocolVersion, mqttProperties, MqttProperties.MqttPropertyType.CORRELATION_DATA));
     }
@@ -554,6 +566,30 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
         }
         byte[] value = (byte[]) property.value();
         return value.clone();
+    }
+
+    private Integer payloadFormatIndicator(int protocolVersion, MqttProperties mqttProperties) {
+        if (protocolVersion != 5 || mqttProperties == null) {
+            return null;
+        }
+        MqttProperties.MqttProperty<?> property = mqttProperties.getProperty(
+                MqttProperties.MqttPropertyType.PAYLOAD_FORMAT_INDICATOR.value());
+        if (property == null || property.value() == null) {
+            return null;
+        }
+        return ((Number) property.value()).intValue();
+    }
+
+    private String contentType(int protocolVersion, MqttProperties mqttProperties) {
+        if (protocolVersion != 5 || mqttProperties == null) {
+            return null;
+        }
+        MqttProperties.MqttProperty<?> property = mqttProperties.getProperty(
+                MqttProperties.MqttPropertyType.CONTENT_TYPE.value());
+        if (property == null || property.value() == null) {
+            return null;
+        }
+        return (String) property.value();
     }
 
     private boolean duplicatePublishProperty(
@@ -679,6 +715,8 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                 io.github.vxmqmqtt.vxmq.protocol.model.MessageExpiry.none(),
                 responseTopic(protocolVersion, mqttProperties),
                 correlationData(protocolVersion, mqttProperties),
+                payloadFormatIndicator(protocolVersion, mqttProperties),
+                contentType(protocolVersion, mqttProperties),
                 duplicatePublishProperty(protocolVersion, mqttProperties, MqttProperties.MqttPropertyType.RESPONSE_TOPIC),
                 duplicatePublishProperty(protocolVersion, mqttProperties, MqttProperties.MqttPropertyType.CORRELATION_DATA));
     }

@@ -616,6 +616,28 @@ class DefaultProtocolEngineTest {
         assertArrayEquals(new byte[]{1, 2, 3}, properties.correlationData());
     }
 
+    // Verifies that online deliveries preserve MQTT 5 payload metadata without inspecting payload bytes.
+    @Test
+    void shouldPreservePayloadMetadataForOnlinePublishDelivery() {
+        ClientConnection publisher = connectClient("publisher-payload-metadata", 5, true, false, 0L);
+        ClientConnection subscriber = connectClient("subscriber-payload-metadata", 5, true, false, 0L);
+        protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("events/+", 0))));
+
+        InboundPublishOutcome result = protocolEngine.handlePublish(publisher, new PublishRequest(
+                "events/temperature",
+                0,
+                0,
+                false,
+                false,
+                new byte[]{(byte) 0xff},
+                payloadMetadataProperties(1, "application/json")));
+
+        PublishProperties properties = result.deliveryPlan().deliveries().getFirst().properties();
+        assertEquals(1, properties.payloadFormatIndicator());
+        assertEquals("application/json", properties.contentType());
+    }
+
     // Verifies that invalid Response Topic values are rejected before routing state changes.
     @Test
     void shouldRejectPublishWithInvalidResponseTopic() {
@@ -1208,6 +1230,28 @@ class DefaultProtocolEngineTest {
         assertArrayEquals(new byte[]{1, 2, 3}, properties.correlationData());
     }
 
+    // Verifies that retained replay preserves MQTT 5 payload metadata.
+    @Test
+    void shouldPreservePayloadMetadataForRetainedReplay() {
+        ClientConnection publisher = connectClient("publisher-retained-payload-metadata", 5, true, false, 0L);
+        protocolEngine.handlePublish(publisher, new PublishRequest(
+                "events/temperature",
+                0,
+                0,
+                true,
+                false,
+                "retained-payload".getBytes(),
+                payloadMetadataProperties(1, "application/json")));
+        ClientConnection subscriber = connectClient("subscriber-retained-payload-metadata", 5, true, false, 0L);
+
+        SubscribeOutcome subscribeResult = protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("events/+", 0))));
+
+        PublishProperties properties = subscribeResult.retainedReplayPlan().deliveries().getFirst().properties();
+        assertEquals(1, properties.payloadFormatIndicator());
+        assertEquals("application/json", properties.contentType());
+    }
+
     // Verifies that expired retained messages are not replayed and are lazily removed.
     @Test
     void shouldNotReplayExpiredRetainedMessage() {
@@ -1431,6 +1475,38 @@ class DefaultProtocolEngineTest {
         assertArrayEquals(new byte[]{1, 2, 3}, properties.correlationData());
     }
 
+    // Verifies that offline queued deliveries preserve MQTT 5 payload metadata across reconnect.
+    @Test
+    void shouldResumeQueuedMessageWithPayloadMetadata() {
+        ClientConnection publisher = connectClient("publisher-payload-metadata-resume", 5, true, false, 0L);
+        ClientConnection firstSubscriberConnection =
+                connectClient("subscriber-payload-metadata-resume", 5, false, false, 60L);
+        protocolEngine.handleSubscribe(firstSubscriberConnection, new SubscriptionRequest(List.of(
+                new SubscriptionItem("events/+", 1))));
+        closeClientConnection(firstSubscriberConnection);
+
+        protocolEngine.handlePublish(publisher, new PublishRequest(
+                "events/temperature",
+                23,
+                1,
+                false,
+                false,
+                "payload".getBytes(),
+                payloadMetadataProperties(1, "application/json")));
+
+        ClientConnection secondSubscriberConnection =
+                connectClient("subscriber-payload-metadata-resume", 5, false, false, 60L);
+        SessionResumePlan resumePlan = protocolEngine.handleSessionResume(secondSubscriberConnection);
+        List<PublishDelivery> resumedDeliveries = resumePlan.actions().stream()
+                .map(ReplayPublish.class::cast)
+                .map(ReplayPublish::delivery)
+                .toList();
+
+        PublishProperties properties = resumedDeliveries.getFirst().properties();
+        assertEquals(1, properties.payloadFormatIndicator());
+        assertEquals("application/json", properties.contentType());
+    }
+
     // Verifies that expired queued messages are discarded instead of being resumed after reconnect.
     @Test
     void shouldDropExpiredQueuedMessageOnReconnect() {
@@ -1538,6 +1614,30 @@ class DefaultProtocolEngineTest {
         PublishProperties properties = pubRelResult.deliveryPlan().deliveries().getFirst().properties();
         assertEquals("responses/client-a", properties.responseTopic());
         assertArrayEquals(new byte[]{1, 2, 3}, properties.correlationData());
+    }
+
+    // Verifies that QoS 2 delayed routing preserves MQTT 5 payload metadata.
+    @Test
+    void shouldPreservePayloadMetadataForQos2PublishAfterPubRel() {
+        ClientConnection publisher = connectClient("publisher-qos2-payload-metadata", 5, true, false, 0L);
+        ClientConnection subscriber = connectClient("subscriber-qos2-payload-metadata", 5, false, false, 60L);
+        protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("events/+", 2))));
+
+        protocolEngine.handlePublish(publisher, new PublishRequest(
+                "events/temperature",
+                49,
+                2,
+                false,
+                false,
+                "payload-qos2".getBytes(),
+                payloadMetadataProperties(1, "application/json")));
+
+        InboundPubRelOutcome pubRelResult = protocolEngine.handlePubRel(publisher, 49);
+
+        PublishProperties properties = pubRelResult.deliveryPlan().deliveries().getFirst().properties();
+        assertEquals(1, properties.payloadFormatIndicator());
+        assertEquals("application/json", properties.contentType());
     }
 
     // Verifies that inbound QoS 2 messages expiring before PUBREL complete without routing.
@@ -1891,6 +1991,32 @@ class DefaultProtocolEngineTest {
         assertArrayEquals(new byte[]{1, 2, 3}, properties.correlationData());
     }
 
+    // Verifies that will publishes preserve MQTT 5 payload metadata.
+    @Test
+    void shouldPublishWillPayloadMetadataAfterAbnormalClose() {
+        ClientConnection subscriber = connectClient("subscriber-will-payload-metadata", 5, true, false, 0L);
+        protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("status/+", 0))));
+        ClientConnection publisher = connectClient(
+                "publisher-will-payload-metadata",
+                5,
+                false,
+                false,
+                60L,
+                new WillMessage(
+                        "status/publisher-will-payload-metadata",
+                        "offline".getBytes(),
+                        MqttQoS.AT_MOST_ONCE,
+                        false,
+                        payloadMetadataProperties(1, "application/json")));
+
+        List<PublishDelivery> deliveries = protocolEngine.handleConnectionClosed(publisher);
+
+        PublishProperties properties = deliveryFor(deliveries, "subscriber-will-payload-metadata").properties();
+        assertEquals(1, properties.payloadFormatIndicator());
+        assertEquals("application/json", properties.contentType());
+    }
+
     // Verifies that a server-originated QoS 2 will is routed immediately instead of entering inbound QoS 2 handshaking.
     @Test
     void shouldPublishQos2WillAfterAbnormalClose() {
@@ -2124,6 +2250,16 @@ class DefaultProtocolEngineTest {
                 MessageExpiry.none(),
                 responseTopic,
                 correlationData);
+    }
+
+    private PublishProperties payloadMetadataProperties(Integer payloadFormatIndicator, String contentType) {
+        return new PublishProperties(
+                MqttUserProperties.empty(),
+                MessageExpiry.none(),
+                null,
+                null,
+                payloadFormatIndicator,
+                contentType);
     }
 
     private DefaultProtocolEngine protocolEngineWith(SubscriptionRegistry subscriptionRegistry) {

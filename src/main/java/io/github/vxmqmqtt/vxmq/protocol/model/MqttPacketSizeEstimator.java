@@ -58,6 +58,12 @@ public final class MqttPacketSizeEstimator {
         if (properties.correlationData() != null) {
             size += 1 + binarySize(properties.correlationData());
         }
+        if (properties.payloadFormatIndicator() != null) {
+            size += 1 + 1;
+        }
+        if (properties.contentType() != null) {
+            size += 1 + utf8Size(properties.contentType());
+        }
         return size;
     }
 

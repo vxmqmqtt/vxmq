@@ -579,6 +579,36 @@ class VertxMqttBrokerTransportTest {
         assertTrue(capturedRequest.get().packetSize() > capturedRequest.get().payloadSize());
     }
 
+    // Verifies that MQTT 5 inbound PUBLISH payload metadata is passed to the protocol engine.
+    @Test
+    void shouldMapMqtt5PublishPayloadMetadata() throws Exception {
+        AtomicReference<PublishRequest> capturedRequest = new AtomicReference<>();
+        ProtocolEngine protocolEngine = protocolEngineCapturingPublish(capturedRequest);
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngine,
+                new ClientConnectionRegistry(),
+                brokerEventSink());
+        ClientConnection connection = connectedClient("client-publish-payload-metadata");
+        EndpointProbe probe = new EndpointProbe(5, true);
+
+        installHandlers(transport, connection, probe.endpoint());
+        probe.invokePublishHandler(new PublishMessageProbe(
+                "events/temperature",
+                7,
+                0,
+                false,
+                false,
+                "payload",
+                payloadMetadataProperties(1, "application/json")).message());
+
+        assertNotNull(capturedRequest.get());
+        assertEquals(1, capturedRequest.get().properties().payloadFormatIndicator());
+        assertEquals("application/json", capturedRequest.get().properties().contentType());
+        assertTrue(capturedRequest.get().packetSize() > capturedRequest.get().payloadSize());
+    }
+
     // Verifies that outbound MQTT 5 publishes include both User Property and Subscription Identifier properties.
     @Test
     void shouldAddUserPropertiesAndSubscriptionIdentifiersToMqtt5PublishProperties() throws Exception {
@@ -656,6 +686,40 @@ class VertxMqttBrokerTransportTest {
         assertNotNull(correlationDataProperty);
         assertEquals("responses/client-a", responseTopicProperty.value());
         assertArrayEquals(new byte[]{1, 2, 3}, (byte[]) correlationDataProperty.value());
+    }
+
+    // Verifies that MQTT 5 outbound publishes include payload metadata properties.
+    @Test
+    void shouldAddPayloadMetadataToMqtt5PublishProperties() throws Exception {
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngineReturning(InboundPublishOutcome.rejected()),
+                new ClientConnectionRegistry(),
+                brokerEventSink());
+        EndpointProbe probe = new EndpointProbe(5, true);
+
+        publishToSubscriber(transport, probe.endpoint(), new PublishDelivery(
+                "subscriber-with-payload-metadata",
+                "events/temperature",
+                "payload".getBytes(),
+                MqttQoS.AT_LEAST_ONCE,
+                false,
+                false,
+                12,
+                false,
+                payloadMetadataProperties(1, "application/json"),
+                List.of()));
+
+        assertNotNull(probe.publishProperties);
+        MqttProperties.MqttProperty<?> payloadFormatProperty = probe.publishProperties.getProperty(
+                MqttProperties.MqttPropertyType.PAYLOAD_FORMAT_INDICATOR.value());
+        MqttProperties.MqttProperty<?> contentTypeProperty = probe.publishProperties.getProperty(
+                MqttProperties.MqttPropertyType.CONTENT_TYPE.value());
+        assertNotNull(payloadFormatProperty);
+        assertNotNull(contentTypeProperty);
+        assertEquals(1, payloadFormatProperty.value());
+        assertEquals("application/json", contentTypeProperty.value());
     }
 
     // Verifies that MQTT 5 outbound publishes include Message Expiry Interval with other publish properties.
@@ -790,6 +854,36 @@ class VertxMqttBrokerTransportTest {
 
         assertEquals("responses/client-a", request.willMessage().properties().responseTopic());
         assertArrayEquals(new byte[]{1, 2, 3}, request.willMessage().properties().correlationData());
+    }
+
+    // Verifies that MQTT 5 CONNECT will payload metadata is mapped onto the broker will model.
+    @Test
+    void shouldMapMqtt5WillPayloadMetadata() throws Exception {
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngineReturning(InboundPublishOutcome.rejected()),
+                new ClientConnectionRegistry(),
+                brokerEventSink());
+        MqttProperties willProperties = new MqttProperties();
+        willProperties.add(new MqttProperties.IntegerProperty(
+                MqttProperties.MqttPropertyType.PAYLOAD_FORMAT_INDICATOR.value(),
+                1));
+        willProperties.add(new MqttProperties.StringProperty(
+                MqttProperties.MqttPropertyType.CONTENT_TYPE.value(),
+                "application/json"));
+        MqttWill will = new MqttWill(
+                true,
+                "status/client-will",
+                Buffer.buffer("offline"),
+                1,
+                true,
+                willProperties);
+
+        ConnectRequest request = buildConnectRequest(transport, new ConnectEndpointProbe(5, will).endpoint());
+
+        assertEquals(1, request.willMessage().properties().payloadFormatIndicator());
+        assertEquals("application/json", request.willMessage().properties().contentType());
     }
 
     // Verifies that a QoS 2 CONNECT will is preserved in the broker will model.
@@ -1073,6 +1167,16 @@ class VertxMqttBrokerTransportTest {
                 MessageExpiry.none(),
                 responseTopic,
                 correlationData);
+    }
+
+    private static PublishProperties payloadMetadataProperties(Integer payloadFormatIndicator, String contentType) {
+        return new PublishProperties(
+                MqttUserProperties.empty(),
+                MessageExpiry.none(),
+                null,
+                null,
+                payloadFormatIndicator,
+                contentType);
     }
 
     private static ClientConnection connectedClient(String clientId) {
@@ -1824,6 +1928,16 @@ class VertxMqttBrokerTransportTest {
                 mqttProperties.add(new MqttProperties.BinaryProperty(
                         MqttProperties.MqttPropertyType.CORRELATION_DATA.value(),
                         publishProperties.correlationData()));
+            }
+            if (publishProperties.payloadFormatIndicator() != null) {
+                mqttProperties.add(new MqttProperties.IntegerProperty(
+                        MqttProperties.MqttPropertyType.PAYLOAD_FORMAT_INDICATOR.value(),
+                        publishProperties.payloadFormatIndicator()));
+            }
+            if (publishProperties.contentType() != null) {
+                mqttProperties.add(new MqttProperties.StringProperty(
+                        MqttProperties.MqttPropertyType.CONTENT_TYPE.value(),
+                        publishProperties.contentType()));
             }
             this.message = (MqttPublishMessage) Proxy.newProxyInstance(
                     MqttPublishMessage.class.getClassLoader(),

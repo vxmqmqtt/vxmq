@@ -44,7 +44,7 @@ sequenceDiagram
 - `retain`
 - `dup`
 - `payload`
-- MQTT 5 PUBLISH properties：当前支持 `User Property`、`Message Expiry Interval`、`Response Topic` 和 `Correlation Data`
+- MQTT 5 PUBLISH properties：当前支持 `User Property`、`Message Expiry Interval`、`Response Topic`、`Correlation Data`、`Payload Format Indicator` 和 `Content Type`
 
 ### 处理流程
 
@@ -73,7 +73,9 @@ sequenceDiagram
 - 已过期消息不会在线投递、离线入队或 retained replay；QoS 1 / QoS 2 协议确认仍按对应状态机完成。
 - MQTT 5 `Response Topic` 会作为 Topic Name 校验；空值、通配符或重复 `Response Topic` / `Correlation Data` 会触发协议错误断连。
 - MQTT 5 `Response Topic` 和 `Correlation Data` 会随在线投递、离线恢复、retained replay、QoS 2 延迟路由和 will 发布原样透传。
-- 出站 MQTT 5 PUBLISH 会写回剩余 `Message Expiry Interval`，并可与 `User Property`、`Subscription Identifier`、`Response Topic` 和 `Correlation Data` 同时存在。
+- MQTT 5 `Payload Format Indicator` 和 `Content Type` 只做纯透传；Broker 不校验 payload 是否符合声明格式。
+- MQTT 5 `Payload Format Indicator` 和 `Content Type` 会随在线投递、离线恢复、retained replay、QoS 2 延迟路由和 will 发布原样透传。
+- 出站 MQTT 5 PUBLISH 会写回剩余 `Message Expiry Interval`，并可与 `User Property`、`Subscription Identifier`、`Response Topic`、`Correlation Data`、`Payload Format Indicator` 和 `Content Type` 同时存在。
 
 ## Request-Response Pattern
 
@@ -167,14 +169,14 @@ sequenceDiagram
 - 显式 `DISCONNECT` 不触发 will。
 - 网络断开、Keep Alive 超时、协议错误断连和连接接管导致的旧连接关闭都可能触发 will。
 - will 被转换为内部 `PublishRequest`，并复用普通 `PUBLISH` 主链路。
-- MQTT 5 Will Properties 当前会提取 `User Property`、`Response Topic` 和 `Correlation Data`，并在 will 触发发布时作为 PUBLISH 属性透传。
+- MQTT 5 Will Properties 当前会提取 `User Property`、`Response Topic`、`Correlation Data`、`Payload Format Indicator` 和 `Content Type`，并在 will 触发发布时作为 PUBLISH 属性透传。
 - MQTT 5 Will Message Expiry Interval 当前未实现；will 不会在 CONNECT 时启动消息过期倒计时。
 - 因此 will 自动继承：
   - Topic 匹配
   - 在线投递
   - 离线持久会话的 QoS 1 入队
   - `retain=true` 时写入 retained store
-  - `User Property`、`Response Topic` 和 `Correlation Data` 在线下发、离线恢复和 retained replay
+  - `User Property`、`Response Topic`、`Correlation Data`、`Payload Format Indicator` 和 `Content Type` 在线下发、离线恢复和 retained replay
 - 当前 will QoS 2 尚未纳入实现；will 解析仍将非 QoS 0 映射为 QoS 1。
 
 ## 协议版本差异
@@ -182,7 +184,7 @@ sequenceDiagram
 - MQTT 3.1.1 与 MQTT 5 的发布订阅主链路基本一致。
 - MQTT 5 在当前实现中会返回显式 reason code 或 `PUBACK(Success)`；MQTT 3.1.1 使用基础返回报文或直接关闭连接。
 - MQTT 5 出站 PUBLISH 会携带当前支持的 properties；MQTT 3.1.1 出站路径不会写 MQTT 5 properties。
-- MQTT 3.1.1 不解析也不写 `Message Expiry Interval`、`Response Topic` 或 `Correlation Data`。
+- MQTT 3.1.1 不解析也不写 `Message Expiry Interval`、`Response Topic`、`Correlation Data`、`Payload Format Indicator` 或 `Content Type`。
 - 差异主要体现在异常断连、reason code 表达和 MQTT 5 属性，而不是基础投递主流程。
 
 ## 当前实现边界
@@ -192,6 +194,6 @@ sequenceDiagram
 - 当前支持基础 will 保存、显式断连抑制和异常关闭发布。
 - 当前支持离线 QoS 1 积压与重连恢复。
 - 当前支持 retained QoS 2 存储与重放，但 will QoS 2 延后。
-- 当前支持 Subscription Options、Subscription Identifier、CONNECT / SUBSCRIBE / UNSUBSCRIBE request properties 建模、PUBLISH / Will User Property 透传、PUBLISH Message Expiry Interval 和 MQTT 5 request-response 属性透传。
+- 当前支持 Subscription Options、Subscription Identifier、CONNECT / SUBSCRIBE / UNSUBSCRIBE request properties 建模、PUBLISH / Will User Property 透传、PUBLISH Message Expiry Interval、MQTT 5 request-response 属性透传，以及 PUBLISH / Will Payload Format Indicator 和 Content Type 纯透传。
 - 当前已接入 SUBSCRIBE、PUBLISH 和 CONNECT Will 鉴权链；默认 authorizer 放行，尚无实际 ACL 规则。
-- 当前不支持 CONNACK / SUBACK / UNSUBACK / DISCONNECT 等出站或非入站 request 的 User Property、共享订阅、Will Message Expiry 和除 Will User Property / Response Topic / Correlation Data 外的高级 MQTT 5 will / retain 属性。
+- 当前不支持 CONNACK / SUBACK / UNSUBACK / DISCONNECT 等出站或非入站 request 的 User Property、共享订阅、Will Message Expiry 和除 Will User Property / Response Topic / Correlation Data / Payload Format Indicator / Content Type 外的高级 MQTT 5 will / retain 属性。
