@@ -5,17 +5,12 @@ package io.github.vxmqmqtt.vxmq.protocol.model;
  */
 public record SubscriptionProperties(
         MqttUserProperties userProperties,
-        Integer subscriptionIdentifier,
-        boolean duplicateSubscriptionIdentifier) {
+        Integer subscriptionIdentifier) {
 
-    private static final SubscriptionProperties EMPTY = new SubscriptionProperties(MqttUserProperties.empty(), null, false);
+    private static final SubscriptionProperties EMPTY = new SubscriptionProperties(MqttUserProperties.empty(), null);
 
     public SubscriptionProperties(MqttUserProperties userProperties) {
-        this(userProperties, null, false);
-    }
-
-    public SubscriptionProperties(MqttUserProperties userProperties, Integer subscriptionIdentifier) {
-        this(userProperties, subscriptionIdentifier, false);
+        this(userProperties, null);
     }
 
     public SubscriptionProperties {
@@ -27,6 +22,6 @@ public record SubscriptionProperties(
     }
 
     public boolean isEmpty() {
-        return userProperties.isEmpty() && subscriptionIdentifier == null && !duplicateSubscriptionIdentifier;
+        return userProperties.isEmpty() && subscriptionIdentifier == null;
     }
 }

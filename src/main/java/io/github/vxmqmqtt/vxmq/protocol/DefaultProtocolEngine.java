@@ -886,17 +886,14 @@ public class DefaultProtocolEngine implements ProtocolEngine {
 
     private static boolean hasInvalidSubscriptionProperties(SubscriptionProperties properties) {
         Integer subscriptionIdentifier = properties.subscriptionIdentifier();
-        return properties.duplicateSubscriptionIdentifier()
-                || (subscriptionIdentifier != null && subscriptionIdentifier < 1);
+        return subscriptionIdentifier != null && subscriptionIdentifier < 1;
     }
 
     private boolean hasInvalidPublishProperties(ClientConnection connection, PublishProperties properties) {
         if (connection.protocolVersion() != 5 || properties == null) {
             return false;
         }
-        return properties.duplicateResponseTopic()
-                || properties.duplicateCorrelationData()
-                || (properties.responseTopic() != null && !mqttTopicSupport.isValidTopicName(properties.responseTopic()));
+        return properties.responseTopic() != null && !mqttTopicSupport.isValidTopicName(properties.responseTopic());
     }
 
     private String resolveClientId(ConnectRequest request) {

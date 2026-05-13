@@ -313,7 +313,7 @@ class VertxMqttBrokerTransportTest {
                 properties));
 
         assertNotNull(capturedRequest.get());
-        assertTrue(capturedRequest.get().properties().duplicateSubscriptionIdentifier());
+        assertEquals(42, capturedRequest.get().properties().subscriptionIdentifier());
     }
 
     // Verifies that protocol-requested SUBSCRIBE disconnects are executed without SUBACK.

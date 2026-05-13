@@ -660,30 +660,6 @@ class DefaultProtocolEngineTest {
         assertTrue(result.deliveryPlan().isEmpty());
     }
 
-    // Verifies that duplicate singleton request-response properties are rejected as protocol errors.
-    @Test
-    void shouldRejectPublishWithDuplicateRequestResponseProperties() {
-        ClientConnection publisher = connectClient("publisher-duplicate-request-response", 5, true, false, 0L);
-
-        InboundPublishOutcome result = protocolEngine.handlePublish(publisher, new PublishRequest(
-                "requests/temperature",
-                0,
-                0,
-                false,
-                false,
-                "payload".getBytes(),
-                new PublishProperties(
-                        MqttUserProperties.empty(),
-                        MessageExpiry.none(),
-                        "responses/client-a",
-                        new byte[]{1, 2, 3},
-                        true,
-                        true)));
-
-        assertTrue(result.disconnectAction().isDisconnect());
-        assertEquals(MqttDisconnectReasonCode.PROTOCOL_ERROR, result.disconnectAction().reasonCode());
-    }
-
     // Verifies that MQTT 5 No Local subscriptions do not receive publishes from the same client.
     @Test
     void shouldSkipNoLocalDeliveryForSameClientPublisher() {
@@ -1015,20 +991,6 @@ class DefaultProtocolEngineTest {
         SubscribeOutcome outcome = protocolEngine.handleSubscribe(connection, new SubscriptionRequest(
                 List.of(new SubscriptionItem("sensors/+/temperature", 1)),
                 new SubscriptionProperties(MqttUserProperties.empty(), 0)));
-
-        assertTrue(outcome.disconnectAction().isDisconnect());
-        assertEquals(MqttDisconnectReasonCode.PROTOCOL_ERROR, outcome.disconnectAction().reasonCode());
-        assertTrue(subscriptionRegistry.match("sensors/room-1/temperature").isEmpty());
-    }
-
-    // Verifies that duplicated MQTT 5 SUBSCRIBE Subscription Identifier is a protocol error.
-    @Test
-    void shouldDisconnectOnDuplicatedSubscriptionIdentifier() {
-        ClientConnection connection = connectClient("subscriber-duplicate-identifier", 5, true, false, 0L);
-
-        SubscribeOutcome outcome = protocolEngine.handleSubscribe(connection, new SubscriptionRequest(
-                List.of(new SubscriptionItem("sensors/+/temperature", 1)),
-                new SubscriptionProperties(MqttUserProperties.empty(), 42, true)));
 
         assertTrue(outcome.disconnectAction().isDisconnect());
         assertEquals(MqttDisconnectReasonCode.PROTOCOL_ERROR, outcome.disconnectAction().reasonCode());

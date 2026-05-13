@@ -9,15 +9,13 @@ public record PublishProperties(
         String responseTopic,
         byte[] correlationData,
         Integer payloadFormatIndicator,
-        String contentType,
-        boolean duplicateResponseTopic,
-        boolean duplicateCorrelationData) {
+        String contentType) {
 
     private static final PublishProperties EMPTY =
-            new PublishProperties(MqttUserProperties.empty(), MessageExpiry.none(), null, null, null, null, false, false);
+            new PublishProperties(MqttUserProperties.empty(), MessageExpiry.none(), null, null, null, null);
 
     public PublishProperties(MqttUserProperties userProperties) {
-        this(userProperties, MessageExpiry.none(), null, null, null, null, false, false);
+        this(userProperties, MessageExpiry.none(), null, null, null, null);
     }
 
     public PublishProperties {
@@ -27,7 +25,7 @@ public record PublishProperties(
     }
 
     public PublishProperties(MqttUserProperties userProperties, MessageExpiry messageExpiry) {
-        this(userProperties, messageExpiry, null, null, null, null, false, false);
+        this(userProperties, messageExpiry, null, null, null, null);
     }
 
     public PublishProperties(
@@ -35,28 +33,7 @@ public record PublishProperties(
             MessageExpiry messageExpiry,
             String responseTopic,
             byte[] correlationData) {
-        this(userProperties, messageExpiry, responseTopic, correlationData, null, null, false, false);
-    }
-
-    public PublishProperties(
-            MqttUserProperties userProperties,
-            MessageExpiry messageExpiry,
-            String responseTopic,
-            byte[] correlationData,
-            Integer payloadFormatIndicator,
-            String contentType) {
-        this(userProperties, messageExpiry, responseTopic, correlationData, payloadFormatIndicator, contentType, false, false);
-    }
-
-    public PublishProperties(
-            MqttUserProperties userProperties,
-            MessageExpiry messageExpiry,
-            String responseTopic,
-            byte[] correlationData,
-            boolean duplicateResponseTopic,
-            boolean duplicateCorrelationData) {
-        this(userProperties, messageExpiry, responseTopic, correlationData, null, null,
-                duplicateResponseTopic, duplicateCorrelationData);
+        this(userProperties, messageExpiry, responseTopic, correlationData, null, null);
     }
 
     public static PublishProperties empty() {
@@ -69,9 +46,7 @@ public record PublishProperties(
                 && responseTopic == null
                 && correlationData == null
                 && payloadFormatIndicator == null
-                && contentType == null
-                && !duplicateResponseTopic
-                && !duplicateCorrelationData;
+                && contentType == null;
     }
 
     @Override
