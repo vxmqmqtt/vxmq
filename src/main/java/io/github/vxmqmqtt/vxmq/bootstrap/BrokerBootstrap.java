@@ -1,6 +1,7 @@
 package io.github.vxmqmqtt.vxmq.bootstrap;
 
 import io.github.vxmqmqtt.vxmq.config.BrokerRuntimeConfig;
+import io.github.vxmqmqtt.vxmq.observability.BrokerRuntimeState;
 import io.github.vxmqmqtt.vxmq.transport.BrokerTransport;
 import io.quarkus.runtime.ShutdownEvent;
 import io.quarkus.runtime.StartupEvent;
@@ -18,10 +19,15 @@ public class BrokerBootstrap {
 
     private final BrokerRuntimeConfig brokerRuntimeConfig;
     private final BrokerTransport brokerTransport;
+    private final BrokerRuntimeState brokerRuntimeState;
 
-    public BrokerBootstrap(BrokerRuntimeConfig brokerRuntimeConfig, BrokerTransport brokerTransport) {
+    public BrokerBootstrap(
+            BrokerRuntimeConfig brokerRuntimeConfig,
+            BrokerTransport brokerTransport,
+            BrokerRuntimeState brokerRuntimeState) {
         this.brokerRuntimeConfig = brokerRuntimeConfig;
         this.brokerTransport = brokerTransport;
+        this.brokerRuntimeState = brokerRuntimeState;
     }
 
     /**
@@ -30,10 +36,16 @@ public class BrokerBootstrap {
     void onStart(@Observes StartupEvent event) {
         if (!brokerRuntimeConfig.enabled()) {
             LOG.info("VXMQ MQTT broker is disabled by configuration");
+            brokerRuntimeState.markDisabled(brokerRuntimeConfig.host(), brokerRuntimeConfig.port());
             return;
         }
         LOG.info("Starting VXMQ MQTT broker");
-        brokerTransport.start().await().indefinitely();
+        try {
+            brokerTransport.start().await().indefinitely();
+        } catch (RuntimeException failure) {
+            brokerRuntimeState.markFailed(brokerRuntimeConfig.host(), brokerRuntimeConfig.port(), failure);
+            throw failure;
+        }
     }
 
     /**

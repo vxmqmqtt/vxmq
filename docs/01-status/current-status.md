@@ -37,13 +37,15 @@
 - Topic Filter / Wildcard 匹配
 - 基础断连语义
 - 基于 `vertx-mqtt` 的 Keep Alive 超时处理
+- Broker Readiness / Liveness 健康检查
 - 单元测试与真实 MQTT 集成测试闭环
 
 ## 当前代码实现边界
 
 - 当前实现是单机、内存态 Broker。
 - 当前主链路已覆盖 QoS 0 / QoS 1 / QoS 2；QoS 2 支持普通发布和 retained 重放，will QoS 2 延后。
-- 当前已实现会话过期的懒清理、持久会话订阅恢复、离线 QoS 1 消息恢复、Retained Message、基础 Will Message、订阅树路由索引、Subscription Options、Subscription Identifier、CONNECT / SUBSCRIBE / UNSUBSCRIBE request properties 建模、PUBLISH / Will User Property 透传、PUBLISH Message Expiry Interval、PUBLISH / Will Payload Format Indicator 与 Content Type 纯透传、Receive Maximum 基础流控、Maximum Packet Size 基础限制、配置驱动 static username/password 认证，以及 CONNECT Will / SUBSCRIBE / PUBLISH 鉴权链接入；尚未实现 TLS、外部认证 backend 和实际 ACL 规则。
+- 当前已实现会话过期的懒清理、持久会话订阅恢复、离线 QoS 1 消息恢复、Retained Message、基础 Will Message、订阅树路由索引、Subscription Options、Subscription Identifier、CONNECT / SUBSCRIBE / UNSUBSCRIBE request properties 建模、PUBLISH / Will User Property 透传、PUBLISH Message Expiry Interval、PUBLISH / Will Payload Format Indicator 与 Content Type 纯透传、Receive Maximum 基础流控、Maximum Packet Size 基础限制、配置驱动 static username/password 认证、CONNECT Will / SUBSCRIBE / PUBLISH 鉴权链接入，以及严格 Broker 语义的 readiness/liveness 健康检查；尚未实现 TLS、外部认证 backend 和实际 ACL 规则。
+- 健康检查通过 Quarkus `/q/health/live` 和 `/q/health/ready` 暴露；`vxmq.broker.enabled=false` 或 MQTT transport 未监听时 readiness 为 DOWN，liveness 只在 broker runtime state 进入 `FAILED` 时为 DOWN。
 - 当前路由和会话状态均为内存实现，不具备持久化和重启恢复能力。
 - 当前主线订阅树已采用 `snapshot / copy-on-write` 方案完成并发安全落地，并加入了更紧凑的不可变节点表示与内部 batch snapshot 重建路径；评估候选与 benchmark harness 作为独立评估套件保留。
 

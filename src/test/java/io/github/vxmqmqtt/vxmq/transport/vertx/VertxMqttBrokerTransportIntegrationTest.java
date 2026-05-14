@@ -14,6 +14,9 @@ import io.github.vxmqmqtt.vxmq.authn.PermitAllAuthnProvider;
 import io.github.vxmqmqtt.vxmq.authn.StaticPasswordAuthnAuthenticator;
 import io.github.vxmqmqtt.vxmq.config.BrokerRuntimeConfig;
 import io.github.vxmqmqtt.vxmq.observability.BrokerEventSink;
+import io.github.vxmqmqtt.vxmq.observability.BrokerRuntimeSnapshot;
+import io.github.vxmqmqtt.vxmq.observability.BrokerRuntimeState;
+import io.github.vxmqmqtt.vxmq.observability.BrokerTransportState;
 import io.github.vxmqmqtt.vxmq.protocol.DefaultProtocolEngine;
 import io.github.vxmqmqtt.vxmq.retained.InMemoryRetainedMessageRegistry;
 import io.github.vxmqmqtt.vxmq.routing.DefaultMqttTopicSupport;
@@ -611,6 +614,54 @@ class VertxMqttBrokerTransportIntegrationTest {
         assertEquals("retained-qos2-payload", receivedPayload.get(5, TimeUnit.SECONDS));
     }
 
+    // Verifies that transport lifecycle state is exposed for readiness and diagnostics.
+    @Test
+    void shouldUpdateRuntimeStateWhenTransportStartsAndStops() {
+        vertx = Vertx.vertx();
+        BrokerRuntimeState runtimeState = new BrokerRuntimeState();
+        transport = newTransport(new TestBrokerRuntimeConfig(1024), runtimeState, new PermitAllAuthnProvider());
+
+        transport.start().await().indefinitely();
+
+        BrokerRuntimeSnapshot running = runtimeState.snapshot();
+        assertEquals(BrokerTransportState.RUNNING, running.transportState());
+        assertTrue(running.ready());
+        assertEquals("127.0.0.1", running.host());
+        assertEquals(0, running.configuredPort());
+        assertEquals(transport.actualPort(), running.actualPort());
+
+        transport.stop().await().indefinitely();
+
+        BrokerRuntimeSnapshot stopped = runtimeState.snapshot();
+        assertEquals(BrokerTransportState.STOPPED, stopped.transportState());
+        assertFalse(stopped.ready());
+        assertTrue(stopped.live());
+    }
+
+    // Verifies that an abnormal listen failure is reproducible through runtime state.
+    @Test
+    void shouldExposeFailedStateWhenTransportCannotListen() {
+        vertx = Vertx.vertx();
+        BrokerRuntimeState primaryState = new BrokerRuntimeState();
+        VertxMqttBrokerTransport primary =
+                newTransport(new TestBrokerRuntimeConfig(1024), primaryState, new PermitAllAuthnProvider());
+        primary.start().await().indefinitely();
+        int occupiedPort = primary.actualPort();
+        BrokerRuntimeState failedState = new BrokerRuntimeState();
+        VertxMqttBrokerTransport duplicate =
+                newTransport(new TestBrokerRuntimeConfig(1024, occupiedPort), failedState, new PermitAllAuthnProvider());
+
+        assertThrows(CompletionException.class, () -> duplicate.start().await().indefinitely());
+
+        BrokerRuntimeSnapshot failed = failedState.snapshot();
+        assertEquals(BrokerTransportState.FAILED, failed.transportState());
+        assertFalse(failed.ready());
+        assertFalse(failed.live());
+        assertTrue(failed.failureMessage().isPresent());
+
+        primary.stop().await().indefinitely();
+    }
+
     private int startBroker() {
         return startBroker(1024);
     }
@@ -634,23 +685,35 @@ class VertxMqttBrokerTransportIntegrationTest {
 
     private int startBroker(int offlineQueueCapacityPerSession, AuthnProvider authnProvider) {
         vertx = Vertx.vertx();
+        BrokerRuntimeState runtimeState = new BrokerRuntimeState();
+        transport = newTransport(
+                new TestBrokerRuntimeConfig(offlineQueueCapacityPerSession),
+                runtimeState,
+                authnProvider);
+        transport.start().await().indefinitely();
+        return transport.actualPort();
+    }
+
+    private VertxMqttBrokerTransport newTransport(
+            BrokerRuntimeConfig brokerRuntimeConfig,
+            BrokerRuntimeState brokerRuntimeState,
+            AuthnProvider authnProvider) {
         DefaultMqttTopicSupport mqttTopicSupport = new DefaultMqttTopicSupport();
         ClientConnectionRegistry connectionRegistry = new ClientConnectionRegistry();
-        transport = new VertxMqttBrokerTransport(
+        return new VertxMqttBrokerTransport(
                 vertx,
-                new TestBrokerRuntimeConfig(offlineQueueCapacityPerSession),
+                brokerRuntimeConfig,
                 new DefaultProtocolEngine(
                         authnProvider,
-                        new InMemorySessionRegistry(offlineQueueCapacityPerSession),
+                        new InMemorySessionRegistry(brokerRuntimeConfig.offlineQueueCapacityPerSession()),
                         new InMemoryRetainedMessageRegistry(mqttTopicSupport),
                         new InMemorySubscriptionRegistry(mqttTopicSupport),
                         mqttTopicSupport,
                         new NoOpBrokerEventSink(),
                         connectionRegistry),
                 connectionRegistry,
-                new NoOpBrokerEventSink());
-        transport.start().await().indefinitely();
-        return transport.actualPort();
+                new NoOpBrokerEventSink(),
+                brokerRuntimeState);
     }
 
     private MqttClient mqttClient(String clientId) {
@@ -725,7 +788,11 @@ class VertxMqttBrokerTransportIntegrationTest {
     /**
      * Test configuration that binds to an ephemeral local port.
      */
-    private record TestBrokerRuntimeConfig(int offlineQueueCapacityPerSession) implements BrokerRuntimeConfig {
+    private record TestBrokerRuntimeConfig(int offlineQueueCapacityPerSession, int port) implements BrokerRuntimeConfig {
+
+        private TestBrokerRuntimeConfig(int offlineQueueCapacityPerSession) {
+            this(offlineQueueCapacityPerSession, 0);
+        }
 
         @Override
         public boolean enabled() {
@@ -739,7 +806,7 @@ class VertxMqttBrokerTransportIntegrationTest {
 
         @Override
         public int port() {
-            return 0;
+            return port;
         }
 
         @Override

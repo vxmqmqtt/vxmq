@@ -2,6 +2,7 @@ package io.github.vxmqmqtt.vxmq.transport.vertx;
 
 import io.github.vxmqmqtt.vxmq.config.BrokerRuntimeConfig;
 import io.github.vxmqmqtt.vxmq.observability.BrokerEventSink;
+import io.github.vxmqmqtt.vxmq.observability.BrokerRuntimeState;
 import io.github.vxmqmqtt.vxmq.protocol.ProtocolEngine;
 import io.github.vxmqmqtt.vxmq.protocol.model.AcceptedConnectResponse;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectOutcome;
@@ -54,6 +55,7 @@ import io.vertx.mutiny.core.Vertx;
 import io.vertx.mutiny.mqtt.MqttEndpoint;
 import io.vertx.mutiny.mqtt.MqttServer;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -72,6 +74,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
     private final ProtocolEngine protocolEngine;
     private final ClientConnectionRegistry connectionRegistry;
     private final BrokerEventSink brokerEventSink;
+    private final BrokerRuntimeState brokerRuntimeState;
     // key: connectionId, value: MqttEndpoint
     private final Map<String, MqttEndpoint> endpointsByConnectionId = new ConcurrentHashMap<>();
     private volatile MqttServer mqttServer;
@@ -82,11 +85,23 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
             ProtocolEngine protocolEngine,
             ClientConnectionRegistry connectionRegistry,
             BrokerEventSink brokerEventSink) {
+        this(vertx, brokerRuntimeConfig, protocolEngine, connectionRegistry, brokerEventSink, new BrokerRuntimeState());
+    }
+
+    @Inject
+    public VertxMqttBrokerTransport(
+            Vertx vertx,
+            BrokerRuntimeConfig brokerRuntimeConfig,
+            ProtocolEngine protocolEngine,
+            ClientConnectionRegistry connectionRegistry,
+            BrokerEventSink brokerEventSink,
+            BrokerRuntimeState brokerRuntimeState) {
         this.vertx = vertx;
         this.brokerRuntimeConfig = brokerRuntimeConfig;
         this.protocolEngine = protocolEngine;
         this.connectionRegistry = connectionRegistry;
         this.brokerEventSink = brokerEventSink;
+        this.brokerRuntimeState = brokerRuntimeState;
     }
 
     @Override
@@ -102,11 +117,23 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                 .setMaxMessageSize(brokerRuntimeConfig.maxMessageSize())
                 .setTimeoutOnConnect(brokerRuntimeConfig.timeoutOnConnectSeconds());
 
-        mqttServer = MqttServer.create(vertx, options);
-        mqttServer.endpointHandler(this::handleEndpoint);
-        return mqttServer.listen()
+        brokerRuntimeState.markStarting(brokerRuntimeConfig.host(), brokerRuntimeConfig.port());
+        MqttServer server = MqttServer.create(vertx, options);
+        mqttServer = server;
+        server.endpointHandler(this::handleEndpoint);
+        return server.listen()
+                .invoke(() -> {
+                    brokerRuntimeState.markRunning(
+                            brokerRuntimeConfig.host(),
+                            brokerRuntimeConfig.port(),
+                            server.actualPort());
+                    brokerEventSink.transportStarted(brokerRuntimeConfig.host(), brokerRuntimeConfig.port());
+                })
                 .replaceWithVoid()
-                .invoke(() -> brokerEventSink.transportStarted(brokerRuntimeConfig.host(), brokerRuntimeConfig.port()));
+                .onFailure().invoke(failure -> {
+                    mqttServer = null;
+                    brokerRuntimeState.markFailed(brokerRuntimeConfig.host(), brokerRuntimeConfig.port(), failure);
+                });
     }
 
     @Override
@@ -117,7 +144,14 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
             return Uni.createFrom().voidItem();
         }
 
-        return server.close().invoke(brokerEventSink::transportStopped);
+        brokerRuntimeState.markStopping(brokerRuntimeConfig.host(), brokerRuntimeConfig.port(), server.actualPort());
+        return server.close()
+                .invoke(() -> {
+                    brokerEventSink.transportStopped();
+                    brokerRuntimeState.markStopped(brokerRuntimeConfig.host(), brokerRuntimeConfig.port());
+                })
+                .onFailure().invoke(failure ->
+                        brokerRuntimeState.markFailed(brokerRuntimeConfig.host(), brokerRuntimeConfig.port(), failure));
     }
 
     private void handleEndpoint(MqttEndpoint endpoint) {

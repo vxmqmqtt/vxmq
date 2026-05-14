@@ -117,7 +117,9 @@ flowchart TD
 ### `observability`
 
 - 记录连接接受、协议告警、订阅变更、消息路由等关键事件。
-- 为后续日志、指标和诊断输出提供统一出口。
+- 维护 Broker runtime state 快照，暴露 `DISABLED / STOPPED / STARTING / RUNNING / STOPPING / FAILED` 等 transport 生命周期状态。
+- 通过 Quarkus SmallRye Health 提供 `/q/health/live` 与 `/q/health/ready`；readiness 采用严格 Broker 语义，只有 MQTT transport 已成功监听时才就绪。
+- 为后续日志、指标和诊断输出提供统一出口；M3-12 metrics 与 M3-13 诊断日志应复用同一 runtime state。
 
 ### `connectionRegistry`
 
