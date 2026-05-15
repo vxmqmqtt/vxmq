@@ -77,4 +77,20 @@ public class LoggingBrokerEventSink implements BrokerEventSink {
                 connection.effectiveClientId(),
                 message);
     }
+
+    @Override
+    public void diagnostic(BrokerDiagnosticEvent event) {
+        if (event == null) {
+            return;
+        }
+        if (event.severity() == BrokerDiagnosticSeverity.WARN || event.severity() == BrokerDiagnosticSeverity.ERROR) {
+            brokerMetrics.protocolWarning();
+        }
+        String message = event.format();
+        switch (event.severity()) {
+            case ERROR -> LOG.error(message);
+            case WARN -> LOG.warn(message);
+            case INFO -> LOG.info(message);
+        }
+    }
 }

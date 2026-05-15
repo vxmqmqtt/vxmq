@@ -10,6 +10,8 @@ import io.github.vxmqmqtt.vxmq.authz.AuthzResult;
 import io.github.vxmqmqtt.vxmq.authz.ConfiguredAuthzProvider;
 import io.github.vxmqmqtt.vxmq.authz.PermitAllAuthzProvider;
 import io.github.vxmqmqtt.vxmq.config.BrokerRuntimeConfig;
+import io.github.vxmqmqtt.vxmq.observability.BrokerDiagnosticEvent;
+import io.github.vxmqmqtt.vxmq.observability.BrokerDiagnosticSeverity;
 import io.github.vxmqmqtt.vxmq.observability.BrokerEventSink;
 import io.github.vxmqmqtt.vxmq.protocol.model.AcceptedConnectResponse;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectOutcome;
@@ -368,13 +370,18 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     public ConnectOutcome handleConnect(ClientConnection connection, ConnectRequest request) {
         // Reject unsupported protocol names or versions before any state is mutated.
         if (!"MQTT".equals(request.protocolName()) || (!request.isMqtt311() && !request.isMqtt5())) {
-            brokerEventSink.protocolWarning(connection, "Unsupported protocol version: " + request.protocolVersion());
+            MqttConnectReturnCode returnCode = rejectUnsupportedProtocolVersion(request);
+            diagnostic(connection, "connect_rejected", "CONNECT", "UNSUPPORTED_PROTOCOL_VERSION")
+                    .mqttReturnCode(returnCode)
+                    .buildDiagnostic();
             return ConnectOutcome.rejected(new RejectedConnectResponse(
-                    rejectUnsupportedProtocolVersion(request),
+                    returnCode,
                     MqttProperties.NO_PROPERTIES));
         }
         if (hasInvalidConnectProperties(request)) {
-            brokerEventSink.protocolWarning(connection, "Invalid MQTT 5 CONNECT properties");
+            diagnostic(connection, "connect_rejected", "CONNECT", "INVALID_CONNECT_PROPERTIES")
+                    .mqttReturnCode(MqttConnectReturnCode.CONNECTION_REFUSED_PROTOCOL_ERROR)
+                    .buildDiagnostic();
             return ConnectOutcome.rejected(new RejectedConnectResponse(
                     MqttConnectReturnCode.CONNECTION_REFUSED_PROTOCOL_ERROR,
                     MqttProperties.NO_PROPERTIES));
@@ -382,21 +389,23 @@ public class DefaultProtocolEngine implements ProtocolEngine {
 
         AuthnResult authnResult = authnProvider.authenticate(connection, request);
         if (!authnResult.allowed()) {
-            brokerEventSink.protocolWarning(
-                    connection,
-                    "Connection rejected by authn provider: "
-                            + authnResult.reason()
-                            + diagnosticSuffix(authnResult));
+            MqttConnectReturnCode returnCode = rejectNotAuthorized(request);
+            diagnostic(connection, "connect_rejected", "CONNECT", authnResult.reason())
+                    .mqttReturnCode(returnCode)
+                    .buildDiagnostic();
             return ConnectOutcome.rejected(new RejectedConnectResponse(
-                    rejectNotAuthorized(request),
+                    returnCode,
                     MqttProperties.NO_PROPERTIES));
         }
 
         String effectiveClientId = resolveClientId(request);
         if (effectiveClientId == null) {
-            brokerEventSink.protocolWarning(connection, "Client identifier rejected");
+            MqttConnectReturnCode returnCode = rejectInvalidClientId(request);
+            diagnostic(connection, "connect_rejected", "CONNECT", "CLIENT_ID_REJECTED")
+                    .mqttReturnCode(returnCode)
+                    .buildDiagnostic();
             return ConnectOutcome.rejected(new RejectedConnectResponse(
-                    rejectInvalidClientId(request),
+                    returnCode,
                     MqttProperties.NO_PROPERTIES));
         }
 
@@ -406,14 +415,12 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 authnResult.principal(),
                 request);
         if (!willAuthzResult.allowed()) {
-            brokerEventSink.protocolWarning(
-                    connection,
-                    "Connection rejected by will authorization: "
-                            + willAuthzResult.reason()
-                            + diagnosticSuffix(willAuthzResult));
-            return ConnectOutcome.rejected(new RejectedConnectResponse(
-                    rejectNotAuthorized(request),
-                    MqttProperties.NO_PROPERTIES));
+            MqttConnectReturnCode returnCode = rejectNotAuthorized(request);
+            diagnostic(connection, "connect_rejected", "CONNECT", willAuthzResult.reason())
+                    .mqttReturnCode(returnCode)
+                    .topic(request.willMessage() == null ? null : request.willMessage().topicName())
+                    .buildDiagnostic();
+            return ConnectOutcome.rejected(new RejectedConnectResponse(returnCode, MqttProperties.NO_PROPERTIES));
         }
 
         MqttProperties responseProperties = buildConnectResponseProperties(request, effectiveClientId);
@@ -442,7 +449,9 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     @Override
     public SubscribeOutcome handleSubscribe(ClientConnection connection, SubscriptionRequest request) {
         if (hasInvalidSubscriptionProperties(request.properties())) {
-            brokerEventSink.protocolWarning(connection, "Invalid MQTT 5 SUBSCRIBE properties");
+            diagnostic(connection, "subscribe_rejected", "SUBSCRIBE", "INVALID_SUBSCRIBE_PROPERTIES")
+                    .mqttReasonCode(MqttDisconnectReasonCode.PROTOCOL_ERROR)
+                    .buildDiagnostic();
             return new SubscribeOutcome(
                     new SubscribeAck(List.of()),
                     RetainedReplayPlan.empty(),
@@ -455,13 +464,21 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         for (SubscriptionItem item : request.items()) {
             String topicFilter = item.topicFilter();
             if (!mqttTopicSupport.isValidFilter(topicFilter)) {
-                brokerEventSink.protocolWarning(connection, "Rejected invalid topic filter: " + topicFilter);
+                diagnostic(connection, "subscribe_item_rejected", "SUBSCRIBE", "TOPIC_FILTER_INVALID")
+                        .mqttReasonCode(MqttSubAckReasonCode.TOPIC_FILTER_INVALID)
+                        .topicFilter(topicFilter)
+                        .qos(item.requestedQos())
+                        .buildDiagnostic();
                 results.add(SubscriptionItemResult.rejected(topicFilter, MqttSubAckReasonCode.TOPIC_FILTER_INVALID));
                 continue;
             }
 
             if (!isSupportedRequestedQos(item.requestedQos())) {
-                brokerEventSink.protocolWarning(connection, "Rejected unsupported requested QoS: " + item.requestedQos());
+                diagnostic(connection, "subscribe_item_rejected", "SUBSCRIBE", "QOS_NOT_SUPPORTED")
+                        .mqttReasonCode(MqttSubAckReasonCode.IMPLEMENTATION_SPECIFIC_ERROR)
+                        .topicFilter(topicFilter)
+                        .qos(item.requestedQos())
+                        .buildDiagnostic();
                 results.add(SubscriptionItemResult.rejected(topicFilter, MqttSubAckReasonCode.IMPLEMENTATION_SPECIFIC_ERROR));
                 continue;
             }
@@ -473,13 +490,11 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                     AuthzAction.SUBSCRIBE,
                     topicFilter));
             if (!authzResult.allowed()) {
-                brokerEventSink.protocolWarning(
-                        connection,
-                        "Rejected unauthorized subscription: "
-                                + topicFilter
-                                + " reason="
-                                + authzResult.reason()
-                                + diagnosticSuffix(authzResult));
+                diagnostic(connection, "subscribe_item_rejected", "SUBSCRIBE", authzResult.reason())
+                        .mqttReasonCode(MqttSubAckReasonCode.NOT_AUTHORIZED)
+                        .topicFilter(topicFilter)
+                        .qos(item.requestedQos())
+                        .buildDiagnostic();
                 results.add(SubscriptionItemResult.rejected(topicFilter, MqttSubAckReasonCode.NOT_AUTHORIZED));
                 continue;
             }
@@ -507,7 +522,12 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 }
             } catch (RuntimeException exception) {
                 restoreSessionSubscription(connection.effectiveClientId(), topicFilter, previousSubscription);
-                brokerEventSink.protocolWarning(connection, "Failed to register subscription: " + topicFilter);
+                diagnostic(connection, "subscribe_item_rejected", "SUBSCRIBE", "SUBSCRIPTION_REGISTRY_FAILURE")
+                        .severity(BrokerDiagnosticSeverity.ERROR)
+                        .mqttReasonCode(MqttSubAckReasonCode.UNSPECIFIED_ERROR)
+                        .topicFilter(topicFilter)
+                        .qos(item.requestedQos())
+                        .buildDiagnostic();
                 results.add(SubscriptionItemResult.rejected(topicFilter, MqttSubAckReasonCode.UNSPECIFIED_ERROR));
             }
         }
@@ -523,7 +543,10 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         List<UnsubscribeItemResult> results = new ArrayList<>();
         for (String topicFilter : request.topicFilters()) {
             if (!mqttTopicSupport.isValidFilter(topicFilter)) {
-                brokerEventSink.protocolWarning(connection, "Rejected invalid topic filter for unsubscribe: " + topicFilter);
+                diagnostic(connection, "unsubscribe_item_rejected", "UNSUBSCRIBE", "TOPIC_FILTER_INVALID")
+                        .mqttReasonCode(MqttUnsubAckReasonCode.TOPIC_FILTER_INVALID)
+                        .topicFilter(topicFilter)
+                        .buildDiagnostic();
                 results.add(UnsubscribeItemResult.rejected(topicFilter, MqttUnsubAckReasonCode.TOPIC_FILTER_INVALID));
                 continue;
             }
@@ -546,7 +569,11 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 if (removedFromSession && previousSubscription != null) {
                     sessionRegistry.addSubscription(previousSubscription);
                 }
-                brokerEventSink.protocolWarning(connection, "Failed to remove subscription: " + topicFilter);
+                diagnostic(connection, "unsubscribe_item_rejected", "UNSUBSCRIBE", "SUBSCRIPTION_REGISTRY_FAILURE")
+                        .severity(BrokerDiagnosticSeverity.ERROR)
+                        .mqttReasonCode(MqttUnsubAckReasonCode.UNSPECIFIED_ERROR)
+                        .topicFilter(topicFilter)
+                        .buildDiagnostic();
                 results.add(UnsubscribeItemResult.rejected(topicFilter, MqttUnsubAckReasonCode.UNSPECIFIED_ERROR));
             }
         }
@@ -556,22 +583,22 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     @Override
     public InboundPublishOutcome handlePublish(ClientConnection connection, PublishRequest request) {
         if (!mqttTopicSupport.isValidTopicName(request.topicName())) {
-            brokerEventSink.protocolWarning(connection, "Rejected publish with invalid topic name: " + request.topicName());
+            publishDiagnostic(connection, request, "TOPIC_NAME_INVALID", MqttDisconnectReasonCode.TOPIC_NAME_INVALID);
             return InboundPublishOutcome.rejectedWithDisconnect(MqttDisconnectReasonCode.TOPIC_NAME_INVALID);
         }
 
         if (request.qos() < 0 || request.qos() > 2) {
-            brokerEventSink.protocolWarning(connection, "Rejected unsupported inbound QoS: " + request.qos());
+            publishDiagnostic(connection, request, "QOS_NOT_SUPPORTED", MqttDisconnectReasonCode.QOS_NOT_SUPPORTED);
             return InboundPublishOutcome.rejectedWithDisconnect(MqttDisconnectReasonCode.QOS_NOT_SUPPORTED);
         }
 
         if (hasInvalidPublishProperties(connection, request.properties())) {
-            brokerEventSink.protocolWarning(connection, "Invalid MQTT 5 PUBLISH request-response properties");
+            publishDiagnostic(connection, request, "INVALID_PUBLISH_PROPERTIES", MqttDisconnectReasonCode.PROTOCOL_ERROR);
             return InboundPublishOutcome.rejectedWithDisconnect(MqttDisconnectReasonCode.PROTOCOL_ERROR);
         }
 
         if (connection.protocolVersion() == 5 && request.packetSize() > brokerMaximumPacketSize) {
-            brokerEventSink.protocolWarning(connection, "Rejected publish over maximum packet size");
+            publishDiagnostic(connection, request, "PACKET_TOO_LARGE", MqttDisconnectReasonCode.PACKET_TOO_LARGE);
             return InboundPublishOutcome.rejectedWithDisconnect(MqttDisconnectReasonCode.PACKET_TOO_LARGE);
         }
 
@@ -582,26 +609,22 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                 AuthzAction.PUBLISH,
                 request.topicName()));
         if (!authzResult.allowed()) {
-            brokerEventSink.protocolWarning(
-                    connection,
-                    "Rejected unauthorized publish: "
-                            + request.topicName()
-                            + " reason="
-                            + authzResult.reason()
-                            + diagnosticSuffix(authzResult));
+            publishDiagnostic(connection, request, authzResult.reason(),
+                    rejectUnauthorizedPublishReasonCode(connection, request.qos()));
             return rejectUnauthorizedPublish(connection, request);
         }
 
         if (request.qos() == 2) {
             if (connection.effectiveClientId() == null || request.packetId() <= 0) {
-                brokerEventSink.protocolWarning(connection, "Rejected QoS 2 publish without a packet id");
+                publishDiagnostic(connection, request, "PACKET_IDENTIFIER_INVALID", MqttDisconnectReasonCode.PROTOCOL_ERROR);
                 return InboundPublishOutcome.rejectedWithDisconnect(MqttDisconnectReasonCode.PROTOCOL_ERROR);
             }
             if (sessionRegistry.find(connection.effectiveClientId())
                     .map(ClientSession::inboundQos2MessageCount)
                     .orElse(0) >= brokerReceiveMaximum
                     && !sessionRegistry.hasInboundQos2Message(connection.effectiveClientId(), request.packetId())) {
-                brokerEventSink.protocolWarning(connection, "Rejected QoS 2 publish over receive maximum");
+                publishDiagnostic(connection, request, "RECEIVE_MAXIMUM_EXCEEDED",
+                        MqttDisconnectReasonCode.RECEIVE_MAXIMUM_EXCEEDED);
                 return InboundPublishOutcome.rejectedWithDisconnect(MqttDisconnectReasonCode.RECEIVE_MAXIMUM_EXCEEDED);
             }
             sessionRegistry.startInboundQos2Message(
@@ -711,7 +734,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
 
      private PublishRoutingResult routeServerPublish(ClientConnection connection, PublishRequest request) {
         if (!mqttTopicSupport.isValidTopicName(request.topicName())) {
-            brokerEventSink.protocolWarning(connection, "Rejected server publish with invalid topic name: " + request.topicName());
+            publishDiagnostic(connection, request, "TOPIC_NAME_INVALID", MqttDisconnectReasonCode.TOPIC_NAME_INVALID);
             return new PublishRoutingResult(List.of(), 0);
         }
         return routePublish(connection, request);
@@ -814,6 +837,13 @@ public class DefaultProtocolEngine implements ProtocolEngine {
 
     @Override
     public void handleDisconnect(ClientConnection connection) {
+        brokerEventSink.diagnostic(BrokerDiagnosticEvent.builder("connection_disconnect")
+                .severity(BrokerDiagnosticSeverity.INFO)
+                .operation("DISCONNECT")
+                .reason("CLIENT_DISCONNECT")
+                .connection(connection)
+                .willPublished(false)
+                .build());
         if (connection.effectiveClientId() != null) {
             sessionRegistry.discardWillMessage(connection.effectiveClientId(), connection.connectionId());
         }
@@ -824,12 +854,34 @@ public class DefaultProtocolEngine implements ProtocolEngine {
     @Override
     public List<PublishDelivery> handleConnectionClosed(ClientConnection connection) {
         List<PublishDelivery> willDeliveries = List.of();
+        boolean willPublished = false;
         if (shouldPublishWill(connection)) {
             willDeliveries = publishWill(connection);
+            willPublished = true;
         }
         if (connection.effectiveClientId() != null) {
-            clearRoutingBindings(sessionRegistry.onConnectionClosed(connection.effectiveClientId(), connection.connectionId())
-                    .orElse(null));
+            ClientSession clearedSession = sessionRegistry
+                    .onConnectionClosed(connection.effectiveClientId(), connection.connectionId())
+                    .orElse(null);
+            clearRoutingBindings(clearedSession);
+            brokerEventSink.diagnostic(BrokerDiagnosticEvent.builder("connection_closed")
+                    .severity(BrokerDiagnosticSeverity.INFO)
+                    .operation("CLOSE")
+                    .reason(connection.state() == ConnectionState.DISCONNECTING ? "CLIENT_DISCONNECT" : "SOCKET_CLOSED")
+                    .connection(connection)
+                    .willPublished(willPublished)
+                    .sessionRemoved(clearedSession != null)
+                    .matchedClients(willDeliveries.size())
+                    .build());
+        } else {
+            brokerEventSink.diagnostic(BrokerDiagnosticEvent.builder("connection_closed")
+                    .severity(BrokerDiagnosticSeverity.INFO)
+                    .operation("CLOSE")
+                    .reason("SOCKET_CLOSED")
+                    .connection(connection)
+                    .willPublished(willPublished)
+                    .matchedClients(willDeliveries.size())
+                    .build());
         }
         connection.transitionTo(ConnectionState.CLOSED);
         return willDeliveries;
@@ -990,6 +1042,19 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             return InboundPublishOutcome.rejectedWithDisconnect(MqttDisconnectReasonCode.NOT_AUTHORIZED);
         }
         return InboundPublishOutcome.rejectedWithDisconnect(null);
+    }
+
+    private Object rejectUnauthorizedPublishReasonCode(ClientConnection connection, int qos) {
+        if (connection.protocolVersion() != 5) {
+            return null;
+        }
+        if (qos == 1) {
+            return MqttPubAckReasonCode.NOT_AUTHORIZED;
+        }
+        if (qos == 2) {
+            return MqttPubRecReasonCode.NOT_AUTHORIZED;
+        }
+        return MqttDisconnectReasonCode.NOT_AUTHORIZED;
     }
 
     private boolean isSupportedRequestedQos(int requestedQos) {
@@ -1227,16 +1292,81 @@ public class DefaultProtocolEngine implements ProtocolEngine {
         }
     }
 
+    private void publishDiagnostic(
+            ClientConnection connection,
+            PublishRequest request,
+            Object reason,
+            Object mqttReasonCode) {
+        diagnostic(connection, "publish_rejected", "PUBLISH", reason)
+                .mqttReasonCode(mqttReasonCode)
+                .topic(request.topicName())
+                .packetId(request.packetId())
+                .qos(request.qos())
+                .buildDiagnostic();
+    }
+
+    private DiagnosticBuilder diagnostic(
+            ClientConnection connection,
+            String event,
+            String operation,
+            Object reason) {
+        return new DiagnosticBuilder(BrokerDiagnosticEvent.builder(event)
+                .severity(BrokerDiagnosticSeverity.WARN)
+                .operation(operation)
+                .reason(reason)
+                .connection(connection));
+    }
+
+    private final class DiagnosticBuilder {
+
+        private final BrokerDiagnosticEvent.Builder delegate;
+
+        private DiagnosticBuilder(BrokerDiagnosticEvent.Builder delegate) {
+            this.delegate = delegate;
+        }
+
+        private DiagnosticBuilder severity(BrokerDiagnosticSeverity severity) {
+            delegate.severity(severity);
+            return this;
+        }
+
+        private DiagnosticBuilder mqttReasonCode(Object mqttReasonCode) {
+            delegate.mqttReasonCode(mqttReasonCode);
+            return this;
+        }
+
+        private DiagnosticBuilder mqttReturnCode(Object mqttReturnCode) {
+            delegate.mqttReturnCode(mqttReturnCode);
+            return this;
+        }
+
+        private DiagnosticBuilder topic(String topic) {
+            delegate.topic(topic);
+            return this;
+        }
+
+        private DiagnosticBuilder topicFilter(String topicFilter) {
+            delegate.topicFilter(topicFilter);
+            return this;
+        }
+
+        private DiagnosticBuilder packetId(int packetId) {
+            delegate.packetId(packetId);
+            return this;
+        }
+
+        private DiagnosticBuilder qos(int qos) {
+            delegate.qos(qos);
+            return this;
+        }
+
+        private void buildDiagnostic() {
+            brokerEventSink.diagnostic(delegate.build());
+        }
+    }
+
     private byte[] copyPayload(byte[] payload) {
         return payload == null ? null : payload.clone();
-    }
-
-    private static String diagnosticSuffix(AuthnResult result) {
-        return result.message() == null ? "" : " (" + result.message() + ")";
-    }
-
-    private static String diagnosticSuffix(AuthzResult result) {
-        return result.message() == null ? "" : " (" + result.message() + ")";
     }
 
     private static int receiveMaximum(BrokerRuntimeConfig config) {

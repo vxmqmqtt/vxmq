@@ -19,6 +19,7 @@ import io.github.vxmqmqtt.vxmq.authz.AuthzResult;
 import io.github.vxmqmqtt.vxmq.authz.AuthzDefinition;
 import io.github.vxmqmqtt.vxmq.authz.AuthzAuthorizer;
 import io.github.vxmqmqtt.vxmq.authz.ConfiguredAuthzProvider;
+import io.github.vxmqmqtt.vxmq.observability.BrokerDiagnosticEvent;
 import io.github.vxmqmqtt.vxmq.observability.BrokerEventSink;
 import io.github.vxmqmqtt.vxmq.protocol.model.AcceptedConnectResponse;
 import io.github.vxmqmqtt.vxmq.protocol.model.ConnectOutcome;
@@ -1786,6 +1787,32 @@ class DefaultProtocolEngineTest {
         assertEquals(MqttDisconnectReasonCode.TOPIC_NAME_INVALID, result.disconnectAction().reasonCode());
     }
 
+    @Test
+    void shouldEmitDiagnosticWhenPublishTopicNameIsRejected() {
+        CapturingBrokerEventSink brokerEventSink = new CapturingBrokerEventSink();
+        protocolEngine = protocolEngineWith(brokerEventSink);
+        ClientConnection publisher = connectClient("publisher-invalid-topic-diagnostic", 5, true, false, 0L);
+
+        protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/+/temperature",
+                1,
+                1,
+                false,
+                false,
+                "payload".getBytes()));
+
+        BrokerDiagnosticEvent diagnostic = brokerEventSink.lastDiagnostic();
+        assertNotNull(diagnostic);
+        assertEquals(
+                "event=publish_rejected severity=WARN operation=PUBLISH reason=TOPIC_NAME_INVALID "
+                        + "connectionId=" + publisher.connectionId()
+                        + " clientId=publisher-invalid-topic-diagnostic"
+                        + " requestedClientId=publisher-invalid-topic-diagnostic"
+                        + " remote=127.0.0.1 protocolVersion=5"
+                        + " mqttReasonCode=TOPIC_NAME_INVALID topic=sensors/+/temperature packetId=1 qos=1",
+                diagnostic.format());
+    }
+
     // Verifies that inbound QoS levels above the MQTT QoS 2 boundary are rejected.
     @Test
     void shouldRejectPublishWithUnsupportedQos3() {
@@ -2236,6 +2263,18 @@ class DefaultProtocolEngineTest {
                 clock);
     }
 
+    private DefaultProtocolEngine protocolEngineWith(BrokerEventSink brokerEventSink) {
+        return new DefaultProtocolEngine(
+                new PermitAllAuthnProvider(),
+                sessionRegistry,
+                retainedMessageRegistry,
+                subscriptionRegistry,
+                mqttTopicSupport,
+                brokerEventSink,
+                connectionRegistry,
+                clock);
+    }
+
     private DefaultProtocolEngine protocolEngineWithAuthz(AuthzAuthorizer authorizer) {
         return new DefaultProtocolEngine(
                 new PermitAllAuthnProvider(),
@@ -2294,6 +2333,48 @@ class DefaultProtocolEngineTest {
 
         @Override
         public void protocolWarning(ClientConnection connection, String message) {
+        }
+    }
+
+    private static final class CapturingBrokerEventSink implements BrokerEventSink {
+
+        private BrokerDiagnosticEvent lastDiagnostic;
+
+        @Override
+        public void transportStarted(String host, int port) {
+        }
+
+        @Override
+        public void transportStopped() {
+        }
+
+        @Override
+        public void connectionAccepted(ClientConnection connection) {
+        }
+
+        @Override
+        public void subscriptionAdded(ClientConnection connection, String topicFilter) {
+        }
+
+        @Override
+        public void subscriptionRemoved(ClientConnection connection, String topicFilter) {
+        }
+
+        @Override
+        public void messageRouted(ClientConnection connection, String topicName, int matchedClients) {
+        }
+
+        @Override
+        public void protocolWarning(ClientConnection connection, String message) {
+        }
+
+        @Override
+        public void diagnostic(BrokerDiagnosticEvent event) {
+            lastDiagnostic = event;
+        }
+
+        private BrokerDiagnosticEvent lastDiagnostic() {
+            return lastDiagnostic;
         }
     }
 

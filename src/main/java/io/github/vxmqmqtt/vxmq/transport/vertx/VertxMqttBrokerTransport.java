@@ -1,6 +1,8 @@
 package io.github.vxmqmqtt.vxmq.transport.vertx;
 
 import io.github.vxmqmqtt.vxmq.config.BrokerRuntimeConfig;
+import io.github.vxmqmqtt.vxmq.observability.BrokerDiagnosticEvent;
+import io.github.vxmqmqtt.vxmq.observability.BrokerDiagnosticSeverity;
 import io.github.vxmqmqtt.vxmq.observability.BrokerEventSink;
 import io.github.vxmqmqtt.vxmq.observability.BrokerRuntimeState;
 import io.github.vxmqmqtt.vxmq.protocol.ProtocolEngine;
@@ -133,6 +135,11 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                 .onFailure().invoke(failure -> {
                     mqttServer = null;
                     brokerRuntimeState.markFailed(brokerRuntimeConfig.host(), brokerRuntimeConfig.port(), failure);
+                    brokerEventSink.diagnostic(BrokerDiagnosticEvent.builder("transport_failed")
+                            .severity(BrokerDiagnosticSeverity.ERROR)
+                            .operation("START")
+                            .reason("TRANSPORT_START_FAILED")
+                            .build());
                 });
     }
 
@@ -151,7 +158,14 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                     brokerRuntimeState.markStopped(brokerRuntimeConfig.host(), brokerRuntimeConfig.port());
                 })
                 .onFailure().invoke(failure ->
-                        brokerRuntimeState.markFailed(brokerRuntimeConfig.host(), brokerRuntimeConfig.port(), failure));
+                        {
+                            brokerRuntimeState.markFailed(brokerRuntimeConfig.host(), brokerRuntimeConfig.port(), failure);
+                            brokerEventSink.diagnostic(BrokerDiagnosticEvent.builder("transport_failed")
+                                    .severity(BrokerDiagnosticSeverity.ERROR)
+                                    .operation("STOP")
+                                    .reason("TRANSPORT_STOP_FAILED")
+                                    .build());
+                        });
     }
 
     private void handleEndpoint(MqttEndpoint endpoint) {
@@ -168,6 +182,14 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
         if (response instanceof RejectedConnectResponse(
                 MqttConnectReturnCode returnCode, MqttProperties responseProperties
         )) {
+            brokerEventSink.diagnostic(BrokerDiagnosticEvent.builder("connect_rejected_transport")
+                    .severity(BrokerDiagnosticSeverity.WARN)
+                    .operation("CONNECT")
+                    .reason("CONNECT_REJECTED")
+                    .connection(connection)
+                    .mqttReturnCode(returnCode)
+                    .transportAction("reject")
+                    .build());
             endpoint.reject(returnCode, responseProperties);
             connectionRegistry.close(connection.connectionId());
             return;
@@ -338,6 +360,16 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
     private void closeSupersededConnection(String connectionId) {
         MqttEndpoint supersededEndpoint = endpointsByConnectionId.remove(connectionId);
         if (supersededEndpoint != null && supersededEndpoint.isConnected()) {
+            brokerEventSink.diagnostic(BrokerDiagnosticEvent.builder("connection_disconnect")
+                    .severity(BrokerDiagnosticSeverity.WARN)
+                    .operation("DISCONNECT")
+                    .reason("SESSION_TAKEN_OVER")
+                    .connectionId(connectionId)
+                    .protocolVersion(supersededEndpoint.protocolVersion())
+                    .mqttReasonCode(MqttDisconnectReasonCode.SESSION_TAKEN_OVER)
+                    .transportAction(disconnectAction(supersededEndpoint.protocolVersion(),
+                            MqttDisconnectReasonCode.SESSION_TAKEN_OVER))
+                    .build());
             closeEndpointWithMqtt5Reason(supersededEndpoint, MqttDisconnectReasonCode.SESSION_TAKEN_OVER);
         }
     }
@@ -346,23 +378,17 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
         // Re-resolve the active connection to avoid publishing to a client that has been taken over.
         String activeConnectionId = connectionRegistry.findActiveConnectionId(delivery.clientId()).orElse(null);
         if (activeConnectionId == null) {
-            brokerEventSink.protocolWarning(null,
-                    "Skipped publish to subscriber clientId=%s: no active connection"
-                            .formatted(delivery.clientId()));
+            deliveryDiagnostic(delivery, null, "NO_ACTIVE_CONNECTION");
             return;
         }
 
         MqttEndpoint endpoint = endpointsByConnectionId.get(activeConnectionId);
         if (endpoint == null) {
-            brokerEventSink.protocolWarning(null,
-                    "Skipped publish to subscriber clientId=%s connectionId=%s: endpoint is not registered"
-                            .formatted(delivery.clientId(), activeConnectionId));
+            deliveryDiagnostic(delivery, activeConnectionId, "ENDPOINT_NOT_REGISTERED");
             return;
         }
         if (!endpoint.isConnected()) {
-            brokerEventSink.protocolWarning(null,
-                    "Skipped publish to subscriber clientId=%s connectionId=%s: endpoint is not connected"
-                            .formatted(delivery.clientId(), activeConnectionId));
+            deliveryDiagnostic(delivery, activeConnectionId, "ENDPOINT_NOT_CONNECTED");
             return;
         }
 
@@ -371,9 +397,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                 .with(
                         ignored -> {
                         },
-                        failure -> brokerEventSink.protocolWarning(null,
-                                "Failed to publish to subscriber clientId=%s connectionId=%s: %s"
-                                        .formatted(delivery.clientId(), activeConnectionId, failure.getMessage())));
+                        failure -> deliveryDiagnostic(delivery, activeConnectionId, "TRANSPORT_WRITE_FAILED"));
     }
 
     private void sendSessionResume(SessionResumePlan resumePlan, MqttEndpoint endpoint) {
@@ -396,12 +420,37 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
             ClientConnection connection,
             MqttEndpoint endpoint,
             MqttDisconnectReasonCode reasonCode) {
+        brokerEventSink.diagnostic(BrokerDiagnosticEvent.builder("connection_disconnect")
+                .severity(BrokerDiagnosticSeverity.WARN)
+                .operation("DISCONNECT")
+                .reason(reasonCode == null ? "PROTOCOL_ERROR" : reasonCode)
+                .connection(connection)
+                .mqttReasonCode(reasonCode)
+                .transportAction(disconnectAction(connection.protocolVersion(), reasonCode))
+                .build());
         // MQTT 5 can signal a precise reason code, while older versions fall back to closing the socket.
         if (connection.protocolVersion() == 5 && reasonCode != null) {
             endpoint.disconnect(reasonCode, MqttProperties.NO_PROPERTIES);
             return;
         }
         endpoint.close();
+    }
+
+    private void deliveryDiagnostic(PublishDelivery delivery, String connectionId, String reason) {
+        brokerEventSink.diagnostic(BrokerDiagnosticEvent.builder("delivery_failed")
+                .severity(BrokerDiagnosticSeverity.ERROR)
+                .operation("PUBLISH")
+                .reason(reason)
+                .clientId(delivery.clientId())
+                .connectionId(connectionId)
+                .topic(delivery.topicName())
+                .packetId(delivery.packetId())
+                .qos(delivery.grantedQos().value())
+                .build());
+    }
+
+    private static String disconnectAction(int protocolVersion, MqttDisconnectReasonCode reasonCode) {
+        return protocolVersion == 5 && reasonCode != null ? "mqtt5_disconnect" : "socket_close";
     }
 
     private void sendInboundPublishAcknowledgement(

@@ -20,4 +20,10 @@ public interface BrokerEventSink {
     void messageRouted(ClientConnection connection, String topicName, int matchedClients);
 
     void protocolWarning(ClientConnection connection, String message);
+
+    default void diagnostic(BrokerDiagnosticEvent event) {
+        if (event != null) {
+            protocolWarning(event.connection(), event.format());
+        }
+    }
 }

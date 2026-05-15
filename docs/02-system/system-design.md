@@ -116,14 +116,15 @@ flowchart TD
 
 ### `observability`
 
-- 记录连接接受、协议告警、订阅变更、消息路由等关键事件。
+- 记录连接接受、协议诊断、订阅变更、消息路由等关键事件。
 - 维护 Broker runtime state 快照，暴露 `DISABLED / STOPPED / STARTING / RUNNING / STOPPING / FAILED` 等 transport 生命周期状态。
 - 通过 Quarkus SmallRye Health 提供 `/q/health/live` 与 `/q/health/ready`；readiness 采用严格 Broker 语义，只有 MQTT transport 已成功监听时才就绪。
 - 通过 Quarkus Micrometer Prometheus 提供 `/q/metrics`，暴露低基数 VXMQ 指标：
   - gauges：`vxmq_connections_active`、`vxmq_sessions_total`、`vxmq_broker_ready`、`vxmq_broker_live`、`vxmq_broker_transport_state{state=...}`。
   - counters：`vxmq_connections_accepted_total`、`vxmq_messages_routed_total`、`vxmq_message_delivery_matches_total`、`vxmq_subscriptions_added_total`、`vxmq_subscriptions_removed_total`、`vxmq_protocol_warnings_total`、`vxmq_transport_starts_total`、`vxmq_transport_stops_total`。
   - 消息速率不在应用内维护滑动窗口，由 Prometheus 查询层使用 `rate(vxmq_messages_routed_total[1m])` 计算。
-- 为后续日志和诊断输出提供统一出口；M3-13 诊断日志应复用同一 runtime state。
+- 诊断日志通过 `BrokerDiagnosticEvent` 输出稳定 `key=value` 字段；`WARN` 和 `ERROR` 诊断事件计入 `vxmq_protocol_warnings_total`，`INFO` 事件仅写日志。
+- 诊断日志不建模密码、payload、correlation data 或 user properties；排障入口见 [`operations-diagnostics.md`](operations-diagnostics.md)。
 
 ### `connectionRegistry`
 
@@ -180,5 +181,5 @@ flowchart TD
 - QoS 2 状态机。
 - MQTT 5 订阅增强能力与关键属性。
 - 外部认证后端与实际 ACL 鉴权规则。
-- 健康检查、指标和日志诊断增强。
+- 健康检查、指标和结构化诊断日志。
 - 持久化与跨重启恢复。

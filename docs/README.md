@@ -27,6 +27,7 @@
 
 - 系统设计与模块边界：[`02-system/system-design.md`](02-system/system-design.md)
 - 状态归属与路由索引：[`02-system/state-and-routing.md`](02-system/state-and-routing.md)
+- 运行诊断与排障入口：[`02-system/operations-diagnostics.md`](02-system/operations-diagnostics.md)
 
 ## 我想知道协议行为是什么
 

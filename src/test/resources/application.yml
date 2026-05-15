@@ -7,6 +7,10 @@ vxmq:
       no-match: allow
 
 quarkus:
+  micrometer:
+    binder:
+      netty:
+        enabled: false
   kafka:
     devservices:
       enabled: false
