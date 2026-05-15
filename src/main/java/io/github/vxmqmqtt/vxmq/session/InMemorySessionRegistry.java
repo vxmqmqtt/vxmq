@@ -326,6 +326,12 @@ public class InMemorySessionRegistry implements SessionRegistry {
         return Optional.ofNullable(sessions.get(clientId));
     }
 
+    @Override
+    public int sessionCount() {
+        sessions.keySet().forEach(this::removeExpiredSessionIfAny);
+        return sessions.size();
+    }
+
     private ClientSession sessionForMutation(String clientId) {
         removeExpiredSessionIfAny(clientId);
         return sessions.computeIfAbsent(clientId, ClientSession::new);

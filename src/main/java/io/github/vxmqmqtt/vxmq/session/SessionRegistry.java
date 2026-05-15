@@ -179,4 +179,9 @@ public interface SessionRegistry {
      * Returns the session for a client if it exists.
      */
     Optional<ClientSession> find(String clientId);
+
+    /**
+     * Returns the number of currently retained sessions.
+     */
+    int sessionCount();
 }

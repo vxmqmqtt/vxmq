@@ -79,7 +79,7 @@
 | M3-09 | Payload Format Indicator / Content Type | 已完成 | PUBLISH / Will Payload Format Indicator 与 Content Type 纯透传；无隐式 payload 内容校验副作用；在线/离线/retained/QoS 2/will 路径测试覆盖 |
 | M3-10 | 用户名密码认证与鉴权链（基础版） | 已完成 | CONNECT 认证入口落地；配置驱动 static username/password 可用；SUBSCRIBE / PUBLISH / Will 鉴权链已接入且当前默认放行；成功/失败路径有测试 |
 | M3-11 | 健康检查（Readiness / Liveness） | 已完成 | 关键组件状态暴露；异常状态可复现验证 |
-| M3-12 | Metrics（连接数 / 会话数 / 消息速率等） | 未开始 | 关键指标可拉取；指标命名和标签规范固定；测试或验收脚本可验证 |
+| M3-12 | Metrics（连接数 / 会话数 / 消息速率等） | 已完成 | `/q/metrics` 暴露连接数、会话数、Broker runtime state、订阅变更、消息路由和协议告警等低基数指标；消息速率由 Prometheus `rate()` 基于 counter 计算；端点验收测试覆盖 |
 | M3-13 | 日志与诊断增强 | 未开始 | 关键协议事件具备可定位日志；错误与断连路径诊断信息完整；文档补充排障入口 |
 
 ### M3 验收门槛

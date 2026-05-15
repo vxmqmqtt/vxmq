@@ -46,7 +46,7 @@
 | 安全 | 用户名密码认证与鉴权链 | M3 | 基础支持 | 基础支持 | 已验证 | 配置驱动 static username/password；未启用认证资源时 permit-all；鉴权链已接入 CONNECT Will / SUBSCRIBE / PUBLISH，当前无 ACL 规则 |
 | 安全 | TLS | M4 | 不支持 | 不支持 | 未开始 | 与部署方式和证书管理联动 |
 | 运维 | 健康检查 | M3 | 基础支持 | 基础支持 | 已验证 | `/q/health/ready` 严格表示 MQTT Broker 可接流量；`/q/health/live` 表示 runtime state 未失败 |
-| 运维 | Metrics | M3 | 不支持 | 不支持 | 未开始 | 连接数、消息速率、会话数等 |
+| 运维 | Metrics | M3 | 基础支持 | 基础支持 | 已验证 | `/q/metrics` 暴露低基数 Broker 指标；包含连接数、会话数、runtime state、订阅变更、消息路由和协议告警；消息速率通过 Prometheus `rate(vxmq_messages_routed_total[1m])` 计算 |
 | 运维 | 日志与追踪基础 | M3 | 基础支持 | 基础支持 | 设计中 | 当前仅有最小事件日志 |
 | 可靠性 | 持久化策略首版 | M4 | 不支持 | 不支持 | 未开始 | 为跨重启恢复提供基础 |
 | 可靠性 | Broker 重启恢复 | M4 | 不支持 | 不支持 | 未开始 | 关键状态和关键消息的跨重启行为 |

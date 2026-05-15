@@ -2,6 +2,7 @@ package io.github.vxmqmqtt.vxmq.observability;
 
 import io.github.vxmqmqtt.vxmq.transport.ClientConnection;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 /**
@@ -11,19 +12,28 @@ import org.jboss.logging.Logger;
 public class LoggingBrokerEventSink implements BrokerEventSink {
 
     private static final Logger LOG = Logger.getLogger(LoggingBrokerEventSink.class);
+    private final BrokerMetrics brokerMetrics;
+
+    @Inject
+    public LoggingBrokerEventSink(BrokerMetrics brokerMetrics) {
+        this.brokerMetrics = brokerMetrics;
+    }
 
     @Override
     public void transportStarted(String host, int port) {
+        brokerMetrics.transportStarted();
         LOG.infov("MQTT transport started on {0}:{1,number,#}", host, port);
     }
 
     @Override
     public void transportStopped() {
+        brokerMetrics.transportStopped();
         LOG.info("MQTT transport stopped");
     }
 
     @Override
     public void connectionAccepted(ClientConnection connection) {
+        brokerMetrics.connectionAccepted();
         LOG.infov("Accepted MQTT connection id={0}, clientId={1}, remote={2}",
                 connection.connectionId(),
                 connection.effectiveClientId(),
@@ -32,6 +42,7 @@ public class LoggingBrokerEventSink implements BrokerEventSink {
 
     @Override
     public void subscriptionAdded(ClientConnection connection, String topicFilter) {
+        brokerMetrics.subscriptionAdded();
         LOG.infov("Registered subscription clientId={0}, filter={1}",
                 connection.effectiveClientId(),
                 topicFilter);
@@ -39,6 +50,7 @@ public class LoggingBrokerEventSink implements BrokerEventSink {
 
     @Override
     public void subscriptionRemoved(ClientConnection connection, String topicFilter) {
+        brokerMetrics.subscriptionRemoved();
         LOG.infov("Removed subscription clientId={0}, filter={1}",
                 connection.effectiveClientId(),
                 topicFilter);
@@ -46,6 +58,7 @@ public class LoggingBrokerEventSink implements BrokerEventSink {
 
     @Override
     public void messageRouted(ClientConnection connection, String topicName, int matchedClients) {
+        brokerMetrics.messageRouted(matchedClients);
         LOG.infov("Routed publish from clientId={0}, topic={1}, matchedClients={2}",
                 connection.effectiveClientId(),
                 topicName,
@@ -54,6 +67,7 @@ public class LoggingBrokerEventSink implements BrokerEventSink {
 
     @Override
     public void protocolWarning(ClientConnection connection, String message) {
+        brokerMetrics.protocolWarning();
         if (connection == null) {
             LOG.warn(message);
             return;

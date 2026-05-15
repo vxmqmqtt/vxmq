@@ -119,7 +119,11 @@ flowchart TD
 - 记录连接接受、协议告警、订阅变更、消息路由等关键事件。
 - 维护 Broker runtime state 快照，暴露 `DISABLED / STOPPED / STARTING / RUNNING / STOPPING / FAILED` 等 transport 生命周期状态。
 - 通过 Quarkus SmallRye Health 提供 `/q/health/live` 与 `/q/health/ready`；readiness 采用严格 Broker 语义，只有 MQTT transport 已成功监听时才就绪。
-- 为后续日志、指标和诊断输出提供统一出口；M3-12 metrics 与 M3-13 诊断日志应复用同一 runtime state。
+- 通过 Quarkus Micrometer Prometheus 提供 `/q/metrics`，暴露低基数 VXMQ 指标：
+  - gauges：`vxmq_connections_active`、`vxmq_sessions_total`、`vxmq_broker_ready`、`vxmq_broker_live`、`vxmq_broker_transport_state{state=...}`。
+  - counters：`vxmq_connections_accepted_total`、`vxmq_messages_routed_total`、`vxmq_message_delivery_matches_total`、`vxmq_subscriptions_added_total`、`vxmq_subscriptions_removed_total`、`vxmq_protocol_warnings_total`、`vxmq_transport_starts_total`、`vxmq_transport_stops_total`。
+  - 消息速率不在应用内维护滑动窗口，由 Prometheus 查询层使用 `rate(vxmq_messages_routed_total[1m])` 计算。
+- 为后续日志和诊断输出提供统一出口；M3-13 诊断日志应复用同一 runtime state。
 
 ### `connectionRegistry`
 
