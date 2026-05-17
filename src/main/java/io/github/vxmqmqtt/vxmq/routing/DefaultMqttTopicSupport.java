@@ -38,6 +38,9 @@ public class DefaultMqttTopicSupport implements MqttTopicSupport {
         if (!isValidFilter(topicFilter) || !isValidTopicName(topicName)) {
             return false;
         }
+        if (topicName.startsWith("$") && !topicFilter.startsWith("$")) {
+            return false;
+        }
 
         String[] filterLevels = topicFilter.split("/", -1);
         String[] topicLevels = topicName.split("/", -1);

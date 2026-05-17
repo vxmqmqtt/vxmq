@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.vxmqmqtt.vxmq.routing.DefaultMqttTopicSupport;
 import io.netty.handler.codec.mqtt.MqttQoS;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -60,5 +61,23 @@ class InMemoryRetainedMessageRegistryTest {
         assertEquals(2, retainedMessageRegistry.findMatching("sensors/+/temperature").size());
         assertEquals(3, retainedMessageRegistry.findMatching("#").size());
         assertFalse(retainedMessageRegistry.findMatching("alerts/+/humidity").iterator().hasNext());
+    }
+
+    // Verifies that retained replay does not expose MQTT system topics to ordinary wildcard filters.
+    @Test
+    void shouldNotReplaySystemTopicsToPlainWildcardFilters() {
+        retainedMessageRegistry.putRetained("$SYS/broker/clients", "system".getBytes(), MqttQoS.AT_MOST_ONCE);
+        retainedMessageRegistry.putRetained("sensors/room-1/temperature", "normal".getBytes(), MqttQoS.AT_MOST_ONCE);
+
+        assertEquals(
+                List.of("sensors/room-1/temperature"),
+                retainedMessageRegistry.findMatching("#").stream()
+                        .map(RetainedMessage::topicName)
+                        .toList());
+        assertEquals(
+                List.of("$SYS/broker/clients"),
+                retainedMessageRegistry.findMatching("$SYS/#").stream()
+                        .map(RetainedMessage::topicName)
+                        .toList());
     }
 }

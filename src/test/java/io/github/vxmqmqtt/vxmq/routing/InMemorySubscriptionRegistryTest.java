@@ -81,6 +81,24 @@ class InMemorySubscriptionRegistryTest {
         assertEquals(List.of("client-a"), matches);
     }
 
+    // Verifies that wildcard bindings at the root do not receive MQTT system topics unless the filter starts with '$'.
+    @Test
+    void shouldNotRouteSystemTopicsToPlainWildcardSubscriptions() {
+        InMemorySubscriptionRegistry registry = new InMemorySubscriptionRegistry(mqttTopicSupport);
+        registry.addSubscription(new SubscriptionBinding("client-hash", "#", MqttQoS.AT_MOST_ONCE));
+        registry.addSubscription(new SubscriptionBinding("client-plus", "+/broker/clients", MqttQoS.AT_MOST_ONCE));
+        registry.addSubscription(new SubscriptionBinding("client-dollar", "$SYS/#", MqttQoS.AT_MOST_ONCE));
+        registry.addSubscription(new SubscriptionBinding("client-exact", "$SYS/broker/clients", MqttQoS.AT_MOST_ONCE));
+
+        List<String> matches = registry.match("$SYS/broker/clients")
+                .stream()
+                .map(SubscriptionBinding::clientId)
+                .sorted()
+                .toList();
+
+        assertEquals(List.of("client-dollar", "client-exact"), matches);
+    }
+
     // Verifies that batch snapshot replacement builds the same routing result as incremental subscription registration.
     @Test
     void shouldBuildEquivalentSnapshotWhenReplacingAllSubscriptions() {

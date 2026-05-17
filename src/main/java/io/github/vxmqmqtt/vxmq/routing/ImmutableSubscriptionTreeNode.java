@@ -158,7 +158,10 @@ final class ImmutableSubscriptionTreeNode {
     }
 
     void match(String[] topicLevels, int levelIndex, Map<String, SubscriptionBinding> deduplicated) {
-        multiLevelWildcardBindings.mergeInto(deduplicated);
+        boolean atSystemTopicRoot = levelIndex == 0 && topicLevels.length > 0 && topicLevels[0].startsWith("$");
+        if (!atSystemTopicRoot) {
+            multiLevelWildcardBindings.mergeInto(deduplicated);
+        }
         if (levelIndex == topicLevels.length) {
             terminalBindings.mergeInto(deduplicated);
             return;
@@ -168,7 +171,7 @@ final class ImmutableSubscriptionTreeNode {
         if (exactChild != null) {
             exactChild.match(topicLevels, levelIndex + 1, deduplicated);
         }
-        if (singleLevelWildcardChild != null) {
+        if (!atSystemTopicRoot && singleLevelWildcardChild != null) {
             singleLevelWildcardChild.match(topicLevels, levelIndex + 1, deduplicated);
         }
     }
