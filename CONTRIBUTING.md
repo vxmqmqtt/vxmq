@@ -24,7 +24,7 @@
 - 文档内容若依赖假设条件，必须在文首或相关章节明确说明。
 - 当前状态只维护在 `docs/01-status/`。
 - 长期系统真相只维护在 `docs/00-foundation/` 和 `docs/02-system/`。
-- ADR 只记录关键决策原因，统一放在 `docs/04-decisions/`，不承担当前状态入口职责。
+- ADR 只记录关键决策原因，统一放在 `docs/03-decisions/`，不承担当前状态入口职责。
 - 过期文档和被替换的旧专题文档进入 `docs/99-archive/`，不作为当前真相引用源。
 - 修改文档结构后，必须同步检查 `README.md`、`docs/README.md` 和相关入口链接。
 - 阶段推进、封板或进入新里程碑时，必须同步检查 `docs/01-status/current-status.md`、`docs/01-status/roadmap.md` 和 `docs/01-status/mqtt5-feature-matrix.md`。

@@ -39,6 +39,6 @@
 
 ## 关联文档
 
-- [`../04-decisions/0001-protocol-compatibility-and-decision-policy.md`](../04-decisions/0001-protocol-compatibility-and-decision-policy.md)
-- [`../04-decisions/0002-m1-client-id-policy.md`](../04-decisions/0002-m1-client-id-policy.md)
-- [`../04-decisions/0003-m1-overlapping-subscription-delivery.md`](../04-decisions/0003-m1-overlapping-subscription-delivery.md)
+- [`../03-decisions/0001-protocol-compatibility-and-decision-policy.md`](../03-decisions/0001-protocol-compatibility-and-decision-policy.md)
+- [`../03-decisions/0002-m1-client-id-policy.md`](../03-decisions/0002-m1-client-id-policy.md)
+- [`../03-decisions/0003-m1-overlapping-subscription-delivery.md`](../03-decisions/0003-m1-overlapping-subscription-delivery.md)

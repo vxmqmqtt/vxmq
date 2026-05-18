@@ -5,7 +5,7 @@
 - `00-foundation`：项目定位、范围、协议兼容原则和术语。
 - `01-status`：当前状态、路线图和能力矩阵。
 - `02-system`：长期系统真相，包括系统结构、状态模型和协议行为。
-- `04-decisions`：ADR 与关键决策记录。
+- `03-decisions`：ADR 与关键决策记录。
 - `99-archive`：过期或被替换的历史文档。
 
 ## 我想知道项目做什么
@@ -37,7 +37,7 @@
 ## 我想知道为什么这样设计
 
 - 当前协作规范：[`../CONTRIBUTING.md`](../CONTRIBUTING.md)
-- ADR 列表：[`04-decisions/README.md`](04-decisions/README.md)
+- ADR 列表：[`03-decisions/README.md`](03-decisions/README.md)
 
 ## 我想看历史记录
 
