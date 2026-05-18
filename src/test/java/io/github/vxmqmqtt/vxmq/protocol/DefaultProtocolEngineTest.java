@@ -1309,6 +1309,33 @@ class DefaultProtocolEngineTest {
         assertEquals(1, sessionRegistry.find("subscriber-qos1-offline").orElseThrow().queuedMessageCount());
     }
 
+    // Verifies that publish routing clears stale subscription bindings for expired offline sessions before matching.
+    @Test
+    void shouldClearRoutingBindingsWhenSessionExpiresBeforePublish() {
+        ClientConnection publisher = connectClient("publisher-expired-routing", 5, true, false, 0L);
+        ClientConnection subscriber = connectClient("subscriber-expired-routing", 5, false, false, 60L);
+        protocolEngine.handleSubscribe(subscriber, new SubscriptionRequest(List.of(
+                new SubscriptionItem("sensors/+/temperature", 1))));
+        closeClientConnection(subscriber);
+        sessionRegistry.find("subscriber-expired-routing")
+                .orElseThrow()
+                .markOffline(clock.instant().minusSeconds(1));
+
+        InboundPublishOutcome result = protocolEngine.handlePublish(publisher, new PublishRequest(
+                "sensors/room-1/temperature",
+                22,
+                1,
+                false,
+                false,
+                "payload".getBytes()));
+
+        assertFalse(result.disconnectAction().isDisconnect());
+        assertTrue(result.deliveryPlan().deliveries().isEmpty());
+        assertEquals(0, result.deliveryPlan().queuedMessageCount());
+        assertTrue(sessionRegistry.find("subscriber-expired-routing").isEmpty());
+        assertTrue(subscriptionRegistry.match("sensors/room-1/temperature").isEmpty());
+    }
+
     // Verifies that queued QoS 1 messages are resumed as inflight deliveries when the subscriber reconnects.
     @Test
     void shouldResumeQueuedQos1MessagesAfterReconnect() {

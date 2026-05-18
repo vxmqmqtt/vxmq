@@ -664,6 +664,7 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             return new PublishRoutingResult(List.of(), 0);
         }
 
+        clearExpiredSessionRoutingBindings(now);
         List<PublishDelivery> deliveries = new ArrayList<>();
         int queuedMessageCount = 0;
         for (SubscriptionBinding binding : subscriptionRegistry.match(request.topicName())) {
@@ -1425,6 +1426,12 @@ public class DefaultProtocolEngine implements ProtocolEngine {
 
         for (String topicFilter : clearedSession.subscriptions()) {
             subscriptionRegistry.removeSubscription(clearedSession.clientId(), topicFilter);
+        }
+    }
+
+    private void clearExpiredSessionRoutingBindings(Instant now) {
+        for (ClientSession expiredSession : sessionRegistry.removeExpiredSessions(now)) {
+            clearRoutingBindings(expiredSession);
         }
     }
 

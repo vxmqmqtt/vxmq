@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.netty.handler.codec.mqtt.MqttQoS;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -95,18 +96,88 @@ class InMemorySessionRegistryTest {
         assertTrue(session.expiresAt().isAfter(Instant.now()));
     }
 
-    // Verifies that expired offline sessions are lazily removed on the next lookup.
+    // Verifies that expired offline sessions are removed only through the explicit expiry API.
     @Test
-    void shouldLazilyPurgeExpiredSessionOnLookup() {
+    void shouldRemoveExpiredSessionThroughExplicitExpiryApi() {
+        Instant now = Instant.parse("2026-05-18T00:00:00Z");
         sessionRegistry.openSession(
                 "expired-client",
                 new SessionOpenRequest(false, true, 30L, "connection-1", null));
 
         sessionRegistry.onConnectionClosed("expired-client", "connection-1");
         ClientSession session = sessionRegistry.find("expired-client").orElseThrow();
-        session.markOffline(Instant.now().minusSeconds(1));
+        session.markOffline(now.minusSeconds(1));
 
+        assertTrue(sessionRegistry.find("expired-client").isPresent());
+        assertTrue(sessionRegistry.removeExpiredSession("expired-client", now).isPresent());
         assertTrue(sessionRegistry.find("expired-client").isEmpty());
+    }
+
+    // Verifies that explicit expiry removal returns the removed session with its subscriptions for cleanup.
+    @Test
+    void shouldReturnExpiredSessionWhenRemovingExpiredSession() {
+        Instant now = Instant.parse("2026-05-18T00:00:00Z");
+        sessionRegistry.openSession(
+                "expired-client",
+                new SessionOpenRequest(false, true, 30L, "connection-1", null));
+        sessionRegistry.addSubscription("expired-client", "sensors/+/temperature", MqttQoS.AT_LEAST_ONCE);
+        sessionRegistry.onConnectionClosed("expired-client", "connection-1");
+        ClientSession session = sessionRegistry.find("expired-client").orElseThrow();
+        session.markOffline(now.minusSeconds(1));
+
+        ClientSession removedSession = sessionRegistry.removeExpiredSession("expired-client", now).orElseThrow();
+
+        assertEquals("expired-client", removedSession.clientId());
+        assertTrue(removedSession.subscriptions().contains("sensors/+/temperature"));
+        assertTrue(sessionRegistry.find("expired-client").isEmpty());
+    }
+
+    // Verifies that explicit expiry sweep removes only expired offline sessions.
+    @Test
+    void shouldReturnAllExpiredSessionsWhenRemovingExpiredSessions() {
+        Instant now = Instant.parse("2026-05-18T00:00:00Z");
+        sessionRegistry.openSession(
+                "expired-a",
+                new SessionOpenRequest(false, true, 30L, "connection-a", null));
+        sessionRegistry.openSession(
+                "expired-b",
+                new SessionOpenRequest(false, true, 30L, "connection-b", null));
+        sessionRegistry.openSession(
+                "active-offline",
+                new SessionOpenRequest(false, true, 30L, "connection-active", null));
+        sessionRegistry.onConnectionClosed("expired-a", "connection-a");
+        sessionRegistry.onConnectionClosed("expired-b", "connection-b");
+        sessionRegistry.onConnectionClosed("active-offline", "connection-active");
+        sessionRegistry.find("expired-a").orElseThrow().markOffline(now.minusSeconds(1));
+        sessionRegistry.find("expired-b").orElseThrow().markOffline(now);
+        sessionRegistry.find("active-offline").orElseThrow().markOffline(now.plusSeconds(1));
+
+        List<String> removedClientIds = sessionRegistry.removeExpiredSessions(now)
+                .stream()
+                .map(ClientSession::clientId)
+                .sorted()
+                .toList();
+
+        assertEquals(List.of("expired-a", "expired-b"), removedClientIds);
+        assertTrue(sessionRegistry.find("expired-a").isEmpty());
+        assertTrue(sessionRegistry.find("expired-b").isEmpty());
+        assertTrue(sessionRegistry.find("active-offline").isPresent());
+    }
+
+    // Verifies that expiry removal never removes a currently online session.
+    @Test
+    void shouldNotRemoveOnlineSessionDuringExpiryRemoval() {
+        Instant now = Instant.parse("2026-05-18T00:00:00Z");
+        sessionRegistry.openSession(
+                "online-client",
+                new SessionOpenRequest(false, true, 30L, "connection-1", null));
+        ClientSession session = sessionRegistry.find("online-client").orElseThrow();
+        session.markOffline(now.minusSeconds(1));
+        session.activate("connection-1", true, 30L, null, 65_535, 268_435_455);
+
+        assertTrue(sessionRegistry.removeExpiredSession("online-client", now).isEmpty());
+        assertTrue(sessionRegistry.removeExpiredSessions(now).isEmpty());
+        assertTrue(sessionRegistry.find("online-client").isPresent());
     }
 
     // Verifies that the registry drops the oldest offline message when the queue capacity is exceeded.

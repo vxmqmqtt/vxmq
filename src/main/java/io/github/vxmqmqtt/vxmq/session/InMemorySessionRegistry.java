@@ -8,6 +8,7 @@ import io.netty.handler.codec.mqtt.MqttQoS;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -43,7 +44,7 @@ public class InMemorySessionRegistry implements SessionRegistry {
 
     @Override
     public SessionOpenResult openSession(String clientId, SessionOpenRequest request) {
-        ClientSession clearedSession = removeExpiredSessionIfAny(clientId);
+        ClientSession clearedSession = removeExpiredSession(clientId, Instant.now()).orElse(null);
         ClientSession existingSession = sessions.get(clientId);
         if (request.startFreshSession()) {
             ClientSession removedSession = sessions.remove(clientId);
@@ -118,6 +119,26 @@ public class InMemorySessionRegistry implements SessionRegistry {
     @Override
     public Optional<ClientSession> removeSession(String clientId) {
         return Optional.ofNullable(sessions.remove(clientId));
+    }
+
+    @Override
+    public Optional<ClientSession> removeExpiredSession(String clientId, Instant now) {
+        ClientSession session = sessions.get(clientId);
+        if (!isExpiredOfflineSession(session, now)) {
+            return Optional.empty();
+        }
+        return sessions.remove(clientId, session) ? Optional.of(session) : Optional.empty();
+    }
+
+    @Override
+    public List<ClientSession> removeExpiredSessions(Instant now) {
+        List<ClientSession> removedSessions = new ArrayList<>();
+        sessions.forEach((clientId, session) -> {
+            if (isExpiredOfflineSession(session, now) && sessions.remove(clientId, session)) {
+                removedSessions.add(session);
+            }
+        });
+        return List.copyOf(removedSessions);
     }
 
     @Override
@@ -322,31 +343,22 @@ public class InMemorySessionRegistry implements SessionRegistry {
 
     @Override
     public Optional<ClientSession> find(String clientId) {
-        removeExpiredSessionIfAny(clientId);
         return Optional.ofNullable(sessions.get(clientId));
     }
 
     @Override
     public int sessionCount() {
-        sessions.keySet().forEach(this::removeExpiredSessionIfAny);
         return sessions.size();
     }
 
     private ClientSession sessionForMutation(String clientId) {
-        removeExpiredSessionIfAny(clientId);
         return sessions.computeIfAbsent(clientId, ClientSession::new);
     }
 
-    private ClientSession removeExpiredSessionIfAny(String clientId) {
-        ClientSession session = sessions.get(clientId);
+    private boolean isExpiredOfflineSession(ClientSession session, Instant now) {
         if (session == null || session.connectionId() != null || session.expiresAt() == null) {
-            return null;
+            return false;
         }
-
-        if (!session.expiresAt().isAfter(Instant.now())) {
-            sessions.remove(clientId, session);
-            return session;
-        }
-        return null;
+        return !session.expiresAt().isAfter(now);
     }
 }

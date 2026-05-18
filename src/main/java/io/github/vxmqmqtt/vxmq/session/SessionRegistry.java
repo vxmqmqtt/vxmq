@@ -30,6 +30,16 @@ public interface SessionRegistry {
     Optional<ClientSession> removeSession(String clientId);
 
     /**
+     * Deletes one expired offline session and returns the removed state for derived-index cleanup.
+     */
+    Optional<ClientSession> removeExpiredSession(String clientId, Instant now);
+
+    /**
+     * Deletes all expired offline sessions and returns the removed states for derived-index cleanup.
+     */
+    List<ClientSession> removeExpiredSessions(Instant now);
+
+    /**
      * Adds a topic filter to the client's session state.
      */
     default void addSubscription(String clientId, String topicFilter, MqttQoS grantedQos) {
