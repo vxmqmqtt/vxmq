@@ -315,9 +315,31 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
 
         endpoint.closeHandler(() -> {
             endpointsByConnectionId.remove(connection.connectionId());
-            connectionRegistry.close(connection.connectionId());
-            protocolEngine.handleConnectionClosed(connection).forEach(this::sendPublishToSubscriber);
+            closeConnection(connection, false);
         });
+    }
+
+    private void handleOutboundDeliveryFailure(PublishDelivery delivery, String connectionId, String reason) {
+        deliveryDiagnostic(delivery, connectionId, reason);
+        ClientConnection connection = connectionRegistry.find(connectionId).orElse(null);
+        if (connection == null) {
+            return;
+        }
+        closeConnection(connection, true);
+    }
+
+    private void closeConnection(ClientConnection connection, boolean closeEndpoint) {
+        String connectionId = connection.connectionId();
+        if (connectionRegistry.find(connectionId).isEmpty()) {
+            return;
+        }
+        List<PublishDelivery> deliveries = protocolEngine.handleConnectionClosed(connection);
+        connectionRegistry.close(connectionId);
+        MqttEndpoint endpoint = endpointsByConnectionId.remove(connectionId);
+        if (closeEndpoint && endpoint != null && endpoint.isConnected()) {
+            endpoint.close();
+        }
+        deliveries.forEach(this::sendPublishToSubscriber);
     }
 
     private ConnectRequest buildConnectRequest(MqttEndpoint endpoint) {
@@ -384,11 +406,11 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
 
         MqttEndpoint endpoint = endpointsByConnectionId.get(activeConnectionId);
         if (endpoint == null) {
-            deliveryDiagnostic(delivery, activeConnectionId, "ENDPOINT_NOT_REGISTERED");
+            handleOutboundDeliveryFailure(delivery, activeConnectionId, "ENDPOINT_NOT_REGISTERED");
             return;
         }
         if (!endpoint.isConnected()) {
-            deliveryDiagnostic(delivery, activeConnectionId, "ENDPOINT_NOT_CONNECTED");
+            handleOutboundDeliveryFailure(delivery, activeConnectionId, "ENDPOINT_NOT_CONNECTED");
             return;
         }
 
@@ -397,7 +419,7 @@ public class VertxMqttBrokerTransport implements BrokerTransport {
                 .with(
                         ignored -> {
                         },
-                        failure -> deliveryDiagnostic(delivery, activeConnectionId, "TRANSPORT_WRITE_FAILED"));
+                        failure -> handleOutboundDeliveryFailure(delivery, activeConnectionId, "TRANSPORT_WRITE_FAILED"));
     }
 
     private void sendSessionResume(SessionResumePlan resumePlan, MqttEndpoint endpoint) {

@@ -39,6 +39,7 @@ import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -457,12 +458,15 @@ class VertxMqttBrokerTransportTest {
     void shouldWarnWhenActiveSubscriberEndpointIsMissing() throws Exception {
         ClientConnectionRegistry connectionRegistry = new ClientConnectionRegistry();
         ClientConnection connection = connectionRegistry.open("127.0.0.1", "subscriber-missing-endpoint", "MQTT", 5, true);
+        connection.assignClientId("subscriber-missing-endpoint");
+        connection.transitionTo(io.github.vxmqmqtt.vxmq.transport.ConnectionState.CONNECTED);
         connectionRegistry.bindClientId("subscriber-missing-endpoint", connection.connectionId());
+        AtomicInteger closeCount = new AtomicInteger();
         AtomicReference<String> warning = new AtomicReference<>();
         VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
                 null,
                 runtimeConfig(),
-                protocolEngineReturning(InboundPublishOutcome.rejected()),
+                protocolEngineCountingClose(closeCount),
                 connectionRegistry,
                 brokerEventSinkCapturingWarning(warning));
 
@@ -479,6 +483,103 @@ class VertxMqttBrokerTransportTest {
         assertNotNull(warning.get());
         assertTrue(warning.get().contains("subscriber-missing-endpoint"));
         assertTrue(warning.get().contains(connection.connectionId()));
+        assertTrue(connectionRegistry.findActiveConnectionId("subscriber-missing-endpoint").isEmpty());
+        assertEquals(1, closeCount.get());
+    }
+
+    // Verifies that a failed outbound write closes the subscriber and lets protocol requeue QoS 1 inflight state.
+    @Test
+    void shouldCloseSubscriberAndRequeueQos1InflightWhenOutboundWriteFails() throws Exception {
+        DefaultMqttTopicSupport mqttTopicSupport = new DefaultMqttTopicSupport();
+        ClientConnectionRegistry connectionRegistry = new ClientConnectionRegistry();
+        InMemorySessionRegistry sessionRegistry = new InMemorySessionRegistry();
+        DefaultProtocolEngine protocolEngine = new DefaultProtocolEngine(
+                new io.github.vxmqmqtt.vxmq.authn.PermitAllAuthnProvider(),
+                sessionRegistry,
+                new InMemoryRetainedMessageRegistry(mqttTopicSupport),
+                new InMemorySubscriptionRegistry(mqttTopicSupport),
+                mqttTopicSupport,
+                brokerEventSink(),
+                connectionRegistry);
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngine,
+                connectionRegistry,
+                brokerEventSink());
+        ClientConnection subscriber = connectionRegistry.open(
+                "127.0.0.1",
+                "subscriber-write-failure",
+                "MQTT",
+                5,
+                false);
+        protocolEngine.handleConnect(subscriber, new Mqtt5ConnectRequest(
+                "subscriber-write-failure",
+                "MQTT",
+                false,
+                60L,
+                null,
+                false,
+                null));
+        sessionRegistry.createInflightMessage(
+                "subscriber-write-failure",
+                "sensors/room-1/temperature",
+                "payload".getBytes(),
+                MqttQoS.AT_LEAST_ONCE,
+                false,
+                false,
+                false).orElseThrow();
+        EndpointProbe endpointProbe = new EndpointProbe(5, true, true);
+        registerEndpoint(transport, subscriber.connectionId(), endpointProbe.endpoint());
+
+        sendPublishToSubscriber(transport, new PublishDelivery(
+                "subscriber-write-failure",
+                "sensors/room-1/temperature",
+                "payload".getBytes(),
+                MqttQoS.AT_LEAST_ONCE,
+                false,
+                false,
+                1,
+                false));
+
+        assertTrue(connectionRegistry.findActiveConnectionId("subscriber-write-failure").isEmpty());
+        assertTrue(endpointProbe.closeCalled);
+        assertNull(sessionRegistry.find("subscriber-write-failure").orElseThrow().connectionId());
+        assertEquals(0, sessionRegistry.find("subscriber-write-failure").orElseThrow().inflightMessageCount());
+        assertEquals(1, sessionRegistry.find("subscriber-write-failure").orElseThrow().queuedMessageCount());
+    }
+
+    // Verifies that a later endpoint close event after outbound failure does not run close cleanup twice.
+    @Test
+    void shouldIgnoreDuplicateCloseAfterOutboundFailure() throws Exception {
+        ClientConnectionRegistry connectionRegistry = new ClientConnectionRegistry();
+        ClientConnection connection = connectionRegistry.open("127.0.0.1", "subscriber-duplicate-close", "MQTT", 5, true);
+        connection.assignClientId("subscriber-duplicate-close");
+        connection.transitionTo(io.github.vxmqmqtt.vxmq.transport.ConnectionState.CONNECTED);
+        connectionRegistry.bindClientId("subscriber-duplicate-close", connection.connectionId());
+        AtomicInteger closeCount = new AtomicInteger();
+        VertxMqttBrokerTransport transport = new VertxMqttBrokerTransport(
+                null,
+                runtimeConfig(),
+                protocolEngineCountingClose(closeCount),
+                connectionRegistry,
+                brokerEventSink());
+        EndpointProbe endpointProbe = new EndpointProbe(5, true, true);
+        installHandlers(transport, connection, endpointProbe.endpoint());
+        registerEndpoint(transport, connection.connectionId(), endpointProbe.endpoint());
+
+        sendPublishToSubscriber(transport, new PublishDelivery(
+                "subscriber-duplicate-close",
+                "sensors/room-1/temperature",
+                "payload".getBytes(),
+                MqttQoS.AT_LEAST_ONCE,
+                false,
+                false,
+                1,
+                false));
+        endpointProbe.invokeCloseHandler();
+
+        assertEquals(1, closeCount.get());
     }
 
     // Verifies that MQTT 5 inbound PUBLISH User Property values are passed to the protocol engine.
@@ -1352,6 +1453,65 @@ class VertxMqttBrokerTransportTest {
         };
     }
 
+    private static ProtocolEngine protocolEngineCountingClose(AtomicInteger closeCount) {
+        return new ProtocolEngine() {
+            @Override
+            public ConnectOutcome handleConnect(ClientConnection connection, ConnectRequest request) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public SubscribeOutcome handleSubscribe(ClientConnection connection, SubscriptionRequest request) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public UnsubscribeAck handleUnsubscribe(ClientConnection connection, UnsubscribeRequest request) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public InboundPublishOutcome handlePublish(ClientConnection connection, PublishRequest request) {
+                return InboundPublishOutcome.rejected();
+            }
+
+            @Override
+            public SessionResumePlan handleSessionResume(ClientConnection connection) {
+                return SessionResumePlan.empty();
+            }
+
+            @Override
+            public DeliveryPlan handlePubAck(ClientConnection connection, int packetId) {
+                return DeliveryPlan.empty();
+            }
+
+            @Override
+            public InboundPubRelOutcome handlePubRel(ClientConnection connection, int packetId) {
+                return InboundPubRelOutcome.alreadyComplete();
+            }
+
+            @Override
+            public OutboundPubRecOutcome handlePubRec(ClientConnection connection, int packetId) {
+                return OutboundPubRecOutcome.send(io.vertx.mqtt.messages.codes.MqttPubRelReasonCode.SUCCESS);
+            }
+
+            @Override
+            public DeliveryPlan handlePubComp(ClientConnection connection, int packetId) {
+                return DeliveryPlan.empty();
+            }
+
+            @Override
+            public void handleDisconnect(ClientConnection connection) {
+            }
+
+            @Override
+            public List<PublishDelivery> handleConnectionClosed(ClientConnection connection) {
+                closeCount.incrementAndGet();
+                return List.of();
+            }
+        };
+    }
+
     private static ProtocolEngine protocolEngineDrainingOnPubAck(PublishDelivery delivery) {
         return new ProtocolEngine() {
             @Override
@@ -1659,6 +1819,7 @@ class VertxMqttBrokerTransportTest {
         private final MqttEndpoint endpoint;
         private final int protocolVersion;
         private final boolean connected;
+        private final boolean failPublish;
         private boolean closeCalled;
         private boolean disconnectCalled;
         private boolean publishAcknowledgeCalled;
@@ -1680,10 +1841,16 @@ class VertxMqttBrokerTransportTest {
         private Handler<Integer> publishReleaseHandler;
         private Handler<Integer> publishReceivedHandler;
         private Handler<Integer> publishCompletionHandler;
+        private Handler<Void> closeHandler;
 
         private EndpointProbe(int protocolVersion, boolean connected) {
+            this(protocolVersion, connected, false);
+        }
+
+        private EndpointProbe(int protocolVersion, boolean connected, boolean failPublish) {
             this.protocolVersion = protocolVersion;
             this.connected = connected;
+            this.failPublish = failPublish;
             io.vertx.mqtt.MqttEndpoint delegate = (io.vertx.mqtt.MqttEndpoint) Proxy.newProxyInstance(
                     io.vertx.mqtt.MqttEndpoint.class.getClassLoader(),
                     new Class<?>[]{io.vertx.mqtt.MqttEndpoint.class},
@@ -1719,7 +1886,11 @@ class VertxMqttBrokerTransportTest {
                             this.publishCompletionHandler = castIntegerHandler(args[0]);
                             yield proxy;
                         }
-                        case "disconnectHandler", "closeHandler" -> proxy;
+                        case "disconnectHandler" -> proxy;
+                        case "closeHandler" -> {
+                            this.closeHandler = castVoidHandler(args[0]);
+                            yield proxy;
+                        }
                         case "publishAcknowledge" -> {
                             this.publishAcknowledgeCalled = true;
                             yield proxy;
@@ -1755,10 +1926,16 @@ class VertxMqttBrokerTransportTest {
                                 @SuppressWarnings("unchecked")
                                 Handler<io.vertx.core.AsyncResult<Integer>> publishHandler =
                                         (Handler<io.vertx.core.AsyncResult<Integer>>) handler;
-                                publishHandler.handle(Future.succeededFuture(1));
+                                if (this.failPublish) {
+                                    publishHandler.handle(Future.failedFuture("simulated publish failure"));
+                                } else {
+                                    publishHandler.handle(Future.succeededFuture(1));
+                                }
                                 yield proxy;
                             }
-                            yield Future.succeededFuture(1);
+                            yield this.failPublish
+                                    ? Future.failedFuture("simulated publish failure")
+                                    : Future.succeededFuture(1);
                         }
                         case "close" -> {
                             this.closeCalled = true;
@@ -1797,6 +1974,11 @@ class VertxMqttBrokerTransportTest {
             unsubscribeHandler.handle(message);
         }
 
+        private void invokeCloseHandler() {
+            assertNotNull(closeHandler);
+            closeHandler.handle(null);
+        }
+
         private void invokePublishReleaseHandler(int packetId) {
             assertNotNull(publishReleaseHandler);
             publishReleaseHandler.handle(packetId);
@@ -1830,6 +2012,11 @@ class VertxMqttBrokerTransportTest {
         @SuppressWarnings("unchecked")
         private static Handler<Integer> castIntegerHandler(Object value) {
             return (Handler<Integer>) value;
+        }
+
+        @SuppressWarnings("unchecked")
+        private static Handler<Void> castVoidHandler(Object value) {
+            return (Handler<Void>) value;
         }
     }
 
