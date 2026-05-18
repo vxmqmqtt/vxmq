@@ -78,6 +78,7 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -1851,6 +1852,70 @@ class DefaultProtocolEngineTest {
         assertTrue(sessionRegistry.find("client-will").isEmpty());
     }
 
+    // Verifies that MQTT 5 CONNECT rejects invalid will topic names before session state is created.
+    @Test
+    void shouldRejectMqtt5ConnectWithInvalidWillTopicBeforeSessionState() {
+        ClientConnection connection = connectionRegistry.open("127.0.0.1", "client-invalid-will-topic", "MQTT", 5, true);
+
+        ConnectOutcome decision = protocolEngine.handleConnect(connection, mqtt5Connect(
+                "client-invalid-will-topic",
+                true,
+                0L,
+                new WillMessage("status/+/offline", "offline".getBytes(), MqttQoS.AT_MOST_ONCE, false)));
+
+        RejectedConnectResponse response = rejectedConnectResponse(decision);
+        assertEquals(MqttConnectReturnCode.CONNECTION_REFUSED_PROTOCOL_ERROR, response.returnCode());
+        assertTrue(sessionRegistry.find("client-invalid-will-topic").isEmpty());
+    }
+
+    // Verifies that invalid MQTT 5 will response topics are rejected before will publish authorization runs.
+    @Test
+    void shouldRejectMqtt5ConnectWithInvalidWillResponseTopicBeforeAuthz() {
+        AtomicInteger authzCalls = new AtomicInteger();
+        protocolEngine = protocolEngineWithAuthz(context -> {
+            authzCalls.incrementAndGet();
+            return AuthzResult.allow();
+        });
+        ClientConnection connection = connectionRegistry.open("127.0.0.1", "client-invalid-will-response", "MQTT", 5, true);
+
+        ConnectOutcome decision = protocolEngine.handleConnect(connection, mqtt5Connect(
+                "client-invalid-will-response",
+                true,
+                0L,
+                new WillMessage(
+                        "status/client-invalid-will-response",
+                        "offline".getBytes(),
+                        MqttQoS.AT_MOST_ONCE,
+                        false,
+                        requestResponseProperties("responses/+", new byte[]{1, 2, 3}))));
+
+        RejectedConnectResponse response = rejectedConnectResponse(decision);
+        assertEquals(MqttConnectReturnCode.CONNECTION_REFUSED_PROTOCOL_ERROR, response.returnCode());
+        assertTrue(sessionRegistry.find("client-invalid-will-response").isEmpty());
+        assertEquals(0, authzCalls.get());
+    }
+
+    // Verifies that MQTT 5 CONNECT rejects invalid will payload format indicators.
+    @Test
+    void shouldRejectMqtt5ConnectWithInvalidWillPayloadFormatIndicator() {
+        ClientConnection connection = connectionRegistry.open("127.0.0.1", "client-invalid-will-pfi", "MQTT", 5, true);
+
+        ConnectOutcome decision = protocolEngine.handleConnect(connection, mqtt5Connect(
+                "client-invalid-will-pfi",
+                true,
+                0L,
+                new WillMessage(
+                        "status/client-invalid-will-pfi",
+                        "offline".getBytes(),
+                        MqttQoS.AT_MOST_ONCE,
+                        false,
+                        payloadMetadataProperties(2, "application/json"))));
+
+        RejectedConnectResponse response = rejectedConnectResponse(decision);
+        assertEquals(MqttConnectReturnCode.CONNECTION_REFUSED_PROTOCOL_ERROR, response.returnCode());
+        assertTrue(sessionRegistry.find("client-invalid-will-pfi").isEmpty());
+    }
+
     // Verifies that authorization receives the authenticated principal established during CONNECT.
     @Test
     void shouldExposeAuthenticatedPrincipalToAuthzContext() {
@@ -2184,6 +2249,11 @@ class DefaultProtocolEngineTest {
 
     private ConnectRequest mqtt311Connect(String clientId, boolean cleanSession, WillMessage willMessage) {
         return new Mqtt311ConnectRequest(clientId, "MQTT", cleanSession, null, false, willMessage);
+    }
+
+    private RejectedConnectResponse rejectedConnectResponse(ConnectOutcome decision) {
+        assertTrue(decision.response() instanceof RejectedConnectResponse);
+        return (RejectedConnectResponse) decision.response();
     }
 
     private ConnectRequest mqtt5Connect(String clientId, boolean cleanStart, long sessionExpiryIntervalSeconds) {

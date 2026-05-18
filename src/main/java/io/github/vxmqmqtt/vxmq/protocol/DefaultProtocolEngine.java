@@ -386,6 +386,15 @@ public class DefaultProtocolEngine implements ProtocolEngine {
                     MqttConnectReturnCode.CONNECTION_REFUSED_PROTOCOL_ERROR,
                     MqttProperties.NO_PROPERTIES));
         }
+        if (hasInvalidWill(request)) {
+            diagnostic(connection, "connect_rejected", "CONNECT", "INVALID_WILL")
+                    .mqttReturnCode(MqttConnectReturnCode.CONNECTION_REFUSED_PROTOCOL_ERROR)
+                    .topic(request.willMessage() == null ? null : request.willMessage().topicName())
+                    .buildDiagnostic();
+            return ConnectOutcome.rejected(new RejectedConnectResponse(
+                    MqttConnectReturnCode.CONNECTION_REFUSED_PROTOCOL_ERROR,
+                    MqttProperties.NO_PROPERTIES));
+        }
 
         AuthnResult authnResult = authnProvider.authenticate(connection, request);
         if (!authnResult.allowed()) {
@@ -946,6 +955,21 @@ public class DefaultProtocolEngine implements ProtocolEngine {
             return false;
         }
         return properties.responseTopic() != null && !mqttTopicSupport.isValidTopicName(properties.responseTopic());
+    }
+
+    private boolean hasInvalidWill(ConnectRequest request) {
+        if (!request.isMqtt5() || request.willMessage() == null) {
+            return false;
+        }
+        WillMessage willMessage = request.willMessage();
+        PublishProperties properties = willMessage.properties();
+        return !mqttTopicSupport.isValidTopicName(willMessage.topicName())
+                || properties.responseTopic() != null && !mqttTopicSupport.isValidTopicName(properties.responseTopic())
+                || isInvalidPayloadFormatIndicator(properties.payloadFormatIndicator());
+    }
+
+    private static boolean isInvalidPayloadFormatIndicator(Integer payloadFormatIndicator) {
+        return payloadFormatIndicator != null && payloadFormatIndicator != 0 && payloadFormatIndicator != 1;
     }
 
     private String resolveClientId(ConnectRequest request) {
