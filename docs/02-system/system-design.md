@@ -79,6 +79,12 @@ flowchart TD
 - 聚合 CONNECT、SUBSCRIBE、UNSUBSCRIBE、PUBLISH、DISCONNECT 与连接关闭的处理决策。
 - 组合 `authn`、`authz`、`session`、`routing`、`retained`、`connectionRegistry` 和 `observability`。
 - 输出标准化结果模型，供 `transport` 映射为具体报文行为。
+- `DefaultProtocolEngine` 作为协议外观保留对 transport 的稳定接口，内部按职责拆分协作者：
+  - `MqttProtocolValidator` 负责协议属性、topic 与 broker limit 校验。
+  - `SessionLifecycleCoordinator` 负责 session truth 删除后清理 routing 派生索引。
+  - `PublishDeliveryCoordinator` 负责 retained 更新、普通投递 fan-out、QoS inflight/pending drain 和 session resume 投递。
+  - `WillService` 负责 MQTT Will 的显式丢弃和异常关闭发布。
+  - `ProtocolDiagnostics` 统一构造协议诊断事件。
 
 ### `session`
 
