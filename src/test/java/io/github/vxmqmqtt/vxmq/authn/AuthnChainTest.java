@@ -55,6 +55,18 @@ class AuthnChainTest {
     }
 
     @Test
+    void shouldFailClosedWhenConfiguredNoMatchPolicyIsMissing() {
+        AuthnChain chain = new AuthnChain(
+                List.of(new AuthnDefinition("abstain", true, context -> AuthnResult.abstain())),
+                null);
+
+        AuthnResult result = chain.authenticate(context("unknown", "secret"));
+
+        assertEquals(AuthnResultStatus.DENY, result.status());
+        assertEquals(AuthnReason.NO_MATCH, result.reason());
+    }
+
+    @Test
     void shouldSkipDisabledAuthnAuthenticators() {
         AuthnChain chain = new AuthnChain(
                 List.of(new AuthnDefinition(

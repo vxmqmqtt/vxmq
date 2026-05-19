@@ -24,6 +24,18 @@ class ConfiguredAuthnProviderTest {
     }
 
     @Test
+    void shouldPermitAllWhenNoAuthnAuthenticatorsAndNoNoMatchPolicyAreConfigured() {
+        ConfiguredAuthnProvider provider = new ConfiguredAuthnProvider(config(
+                Optional.empty(),
+                List.of()));
+
+        AuthnResult result = provider.authenticate(connection(), request("anonymous", null, false));
+
+        assertEquals(AuthnResultStatus.ALLOW, result.status());
+        assertEquals(AuthnReason.SUCCESS, result.reason());
+    }
+
+    @Test
     void shouldAuthenticateConfiguredStaticPasswordUser() {
         ConfiguredAuthnProvider provider = new ConfiguredAuthnProvider(config(
                 Optional.of(AuthnNoMatchPolicy.DENY),
@@ -42,6 +54,26 @@ class ConfiguredAuthnProviderTest {
         assertEquals("device-a", allowed.principal());
         assertEquals(AuthnResultStatus.DENY, denied.status());
         assertEquals(AuthnReason.BAD_USERNAME_OR_PASSWORD, denied.reason());
+    }
+
+    @Test
+    void shouldFailClosedForUnknownStaticPasswordUserWhenNoNoMatchPolicyIsConfigured() {
+        ConfiguredAuthnProvider provider = new ConfiguredAuthnProvider(config(
+                Optional.empty(),
+                List.of(authenticator(
+                        "local-users",
+                        true,
+                        "password",
+                        "static",
+                        List.of(user("device-a", "secret-a"))))));
+
+        AuthnResult allowed = provider.authenticate(connection(), request("device-a", "secret-a", true));
+        AuthnResult denied = provider.authenticate(connection(), request("unknown", "secret-a", true));
+
+        assertEquals(AuthnResultStatus.ALLOW, allowed.status());
+        assertEquals(AuthnReason.SUCCESS, allowed.reason());
+        assertEquals(AuthnResultStatus.DENY, denied.status());
+        assertEquals(AuthnReason.NO_MATCH, denied.reason());
     }
 
     @Test

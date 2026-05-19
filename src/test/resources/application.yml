@@ -1,6 +1,7 @@
 vxmq:
   broker:
     enabled: false
+    # Test profile keeps the empty auth chains open; production defaults must not set no-match allow.
     authn:
       no-match: allow
     authz:

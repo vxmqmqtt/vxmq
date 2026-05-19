@@ -23,6 +23,18 @@ class ConfiguredAuthzProviderTest {
     }
 
     @Test
+    void shouldPermitAllWhenNoAuthzAuthorizersAndNoNoMatchPolicyAreConfigured() {
+        ConfiguredAuthzProvider provider = new ConfiguredAuthzProvider(config(
+                Optional.empty(),
+                List.of()));
+
+        AuthzResult result = provider.authorize(context());
+
+        assertEquals(AuthzResultStatus.ALLOW, result.status());
+        assertEquals(AuthzReason.SUCCESS, result.reason());
+    }
+
+    @Test
     void shouldFailFastForUnsupportedConfiguredAuthzAuthorizer() {
         AuthzRuntimeConfig.AuthzAuthorizerConfig authorizer = authorizer(
                 "acl-1",

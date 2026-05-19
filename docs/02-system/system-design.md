@@ -102,7 +102,8 @@ flowchart TD
 
 - 提供客户端认证链。
 - 当前支持配置驱动的 static username/password backend。
-- Broker 默认配置保持 permit-all；启用认证资源后若未显式设置 no-match，链未匹配按 fail-closed 拒绝。
+- 未启用任何认证资源时使用 permit-all，作为开发和空配置模式。
+- 启用认证资源后，若未显式设置 `no-match`，链未匹配按 fail-closed 拒绝；生产基线配置不设置 `no-match: allow`。
 - 认证资源以有序、可启停 definition 建模，为未来后台管理系统运行时创建、排序和启停预留边界。
 - 可从 `ConnectRequest` 读取 MQTT 5 CONNECT `User Property`，供后续认证插件使用。
 
@@ -111,7 +112,8 @@ flowchart TD
 - 提供客户端操作鉴权 provider 和鉴权链。
 - 当前已接入 CONNECT Will、SUBSCRIBE 和 PUBLISH 主链路。
 - 鉴权上下文包含 `clientId`、认证后的 principal、操作类型和 topic。
-- Broker 默认配置保持 permit-all，不提供实际 ACL 规则；后续启用鉴权资源后若未显式设置 no-match，链未匹配按 fail-closed 拒绝。
+- 未启用任何鉴权资源时使用 permit-all，不提供实际 ACL 规则。
+- 后续启用鉴权资源后，若未显式设置 `no-match`，链未匹配按 fail-closed 拒绝；开发、测试或 demo 环境若需要开放，应在对应 profile 显式设置 `no-match: allow`。
 - 后续 ACL、HTTP、SQL 或缓存型 authorizer 应复用同一 `AuthzProvider` 边界。
 
 ### `observability`

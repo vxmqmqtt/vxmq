@@ -7,10 +7,6 @@ vxmq:
     timeout-on-connect-seconds: 10
     receive-maximum: 65535
     offline-queue-capacity-per-session: 1024
-    authn:
-      no-match: allow
-    authz:
-      no-match: allow
 
 quarkus:
   micrometer:

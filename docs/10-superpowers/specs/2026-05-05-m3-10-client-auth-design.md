@@ -100,7 +100,7 @@ io.github.vxmqmqtt.vxmq.authz
 - authenticator 返回 `ALLOW` 时立即允许连接。
 - authenticator 返回 `DENY` 时立即拒绝连接。
 - authenticator 返回 `ABSTAIN` 时继续下一个。
-- 所有 authenticator 都未匹配时，按全局 `no-match` 策略处理。Broker 默认配置是 `allow`，用于保持未配置资源时的 permit-all 行为；一旦启用了至少一个认证资源但省略 `no-match`，构建逻辑按 `deny` fail-closed，避免配置了用户却放行未知客户端。
+- 所有 authenticator 都未匹配时，按全局 `no-match` 策略处理。未配置任何认证资源时使用 permit-all 链；一旦启用了至少一个认证资源但省略 `no-match`，构建逻辑按 `deny` fail-closed，避免配置了用户却放行未知客户端。
 
 鉴权决策：
 
@@ -112,7 +112,7 @@ io.github.vxmqmqtt.vxmq.authz
 
 - disabled authorizer 跳过。
 - `ALLOW` 或 `DENY` 都是最终决策。
-- 所有 authorizer 都未匹配时，按全局 `no-match` 策略处理。Broker 默认配置是 `allow`，用于保持当前 publish/subscribe permit-all 行为；后续启用具体 authorizer 资源但省略 `no-match` 时，构建逻辑按 `deny` fail-closed。
+- 所有 authorizer 都未匹配时，按全局 `no-match` 策略处理。未配置任何鉴权资源时使用 permit-all 链；后续启用具体 authorizer 资源但省略 `no-match` 时，构建逻辑按 `deny` fail-closed。
 
 当前 M3-10 只会存在 permit-all authorizer，因此鉴权不会改变现有发布订阅行为。
 
@@ -136,7 +136,7 @@ vxmq:
             - username: device-b
               password: secret-b
     authz:
-      no-match: allow
+      no-match: deny
 ```
 
 字段含义：
